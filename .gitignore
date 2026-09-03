@@ -1,0 +1,46 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Data & artifact: isinya diabaikan, struktur foldernya dijaga lewat .gitkeep.
+# Direktori sengaja di-include kembali (pola !.../ di bawah) karena git tidak
+# menelusuri direktori yang sudah dikecualikan, sehingga negasi pada .gitkeep
+# di dalamnya tidak akan pernah cocok.
+data/**
+storage/**
+outputs/**
+models/**
+!data/**/
+!storage/**/
+!outputs/**/
+!models/**/
+!**/.gitkeep
+
+# Dokumen FAQ contoh ikut dikomit supaya repo bisa langsung dicoba orang lain;
+# dokumen FAQ klien yang asli tetap tertutup aturan data/** di atas.
+!data/raw/faq/faq-contoh.md
+
+# Artefak Supabase CLI. supabase/.temp/pooler-url memuat connection string
+# lengkap dengan password database, jadi seluruh direktori ini diabaikan.
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+
+# Model cache HuggingFace lokal
+.cache/
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

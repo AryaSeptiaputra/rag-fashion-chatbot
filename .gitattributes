@@ -1,0 +1,7 @@
+# Normalisasi akhir baris: LF di repository, apa pun platform kontributor.
+* text=auto eol=lf
+
+# File biner jangan diutak-atik.
+*.png binary
+*.jpg binary
+*.pdf binary
