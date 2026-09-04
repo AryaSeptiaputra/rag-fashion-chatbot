@@ -1,8 +1,8 @@
-"""Test perakitan penilai RAGAS dan DeepEval.
+"""Test perakitan penilai DeepEval.
 
-Berkas ini ter-skip di venv utama karena kedua pustaka hanya terpasang di
+Sebagian test ter-skip di venv utama karena DeepEval hanya terpasang di
 .venv-eval. Yang diuji di sini adalah bagian yang tidak memanggil model juri:
-perakitan client, penolakan trace yang tidak bisa dinilai, dan metrik
+penanganan kunci API, penolakan trace yang tidak bisa dinilai, dan metrik
 hit-rate yang memang deterministik.
 """
 
@@ -67,28 +67,6 @@ def test_judge_key_is_returned_when_present() -> None:
         assert settings.require_judge_key() == "sk-ant-contoh"
     finally:
         settings.anthropic_api_key = original
-
-
-def test_embedding_client_stays_on_the_local_ollama_endpoint() -> None:
-    # Juri pindah ke Claude, embedding tidak: Anthropic tidak menyediakan API
-    # embedding, dan metrik yang memakainya hanya mengukur kemiripan vektor.
-    pytest.importorskip("openai")
-    from app.evals.judge import build_embedding_client
-
-    client = build_embedding_client()
-
-    assert str(client.base_url).rstrip("/").endswith("/v1")
-    assert settings.ollama_base_url.split("//", 1)[-1] in str(client.base_url)
-
-
-def test_answer_evaluator_refuses_traces_without_evidence() -> None:
-    pytest.importorskip("ragas")
-    from app.evals.answer import AnswerQualityEvaluator
-
-    evaluator = AnswerQualityEvaluator(judge=object())
-
-    with pytest.raises(ValueError, match="keluaran tool"):
-        evaluator.evaluate([make_trace(contexts=[])])
 
 
 def test_retrieval_evaluator_refuses_traces_without_retrieval() -> None:

@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=PROJECT_ROOT / "outputs" / "eval_trace.jsonl",
         help=(
-            "Path file trace JSONL untuk penilaian RAGAS dan DeepEval. "
+            "Path file trace JSONL untuk penilaian mutu retrieval. "
             "Ditulis di run yang sama supaya chatbot tidak perlu dijalankan dua kali."
         ),
     )

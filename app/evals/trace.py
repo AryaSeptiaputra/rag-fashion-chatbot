@@ -1,4 +1,4 @@
-"""Jejak satu giliran eval: masukan penilai RAGAS dan DeepEval.
+"""Jejak satu giliran eval: masukan penilai mutu.
 
 Trace ditulis saat generate dan dibaca saat menilai. Pemisahan itu disengaja:
 generate butuh Supabase, ChromaDB, dan model yang diuji, sedangkan penilaian

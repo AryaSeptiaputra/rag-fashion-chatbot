@@ -1,4 +1,4 @@
-"""Bentuk laporan penilaian, sama untuk RAGAS maupun DeepEval."""
+"""Bentuk laporan penilaian mutu."""
 
 from statistics import fmean
 
@@ -46,7 +46,7 @@ class QualityReport(BaseModel):
         infrastruktur terbaca seperti kegagalan sistem yang diuji.
 
         Args:
-            metric_family: Nama keluarga metrik, mis. "ragas-answer".
+            metric_family: Nama keluarga metrik, mis. "deepeval-retrieval".
             judge_model: Model juri yang menghasilkan skor ini.
             cases: Skor per kasus.
             notes: Catatan yang harus ikut terbaca bersama angkanya.

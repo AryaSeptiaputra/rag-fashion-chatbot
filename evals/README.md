@@ -1,18 +1,21 @@
 # Eval Harness
 
-Tiga lapis pengukuran, dari yang paling murah ke paling mahal:
+Dua lapis pengukuran:
 
 | Lapis | Dijalankan oleh | Butuh juri LLM? | Yang diukur |
 |---|---|---|---|
 | Akurasi pemilihan tool | `scripts/run_eval.py` | Tidak | Agent memilih sumber data yang benar |
-| Mutu jawaban akhir | RAGAS, lewat notebook | Ya, Claude API | Jawaban bersandar pada bukti dan menjawab yang ditanya |
 | Mutu retrieval | DeepEval, lewat notebook | Ya, Claude API (kecuali `section_hit_rate`) | Potongan yang tepat terambil, dan berperingkat benar |
 
 Lapis pertama menguji klaim inti project: **agent dengan 8 tool di atas 28 tabel tetap
-memilih sumber data yang benar, dan tidak mengarang saat data tidak ada.** Dua lapis
-berikutnya menguji hal yang tidak terjangkau jejak tool call: apakah kalimat yang
-sampai ke pembeli benar-benar bersandar pada bukti, dan apakah buktinya sendiri sudah
-yang tepat.
+memilih sumber data yang benar, dan tidak mengarang saat data tidak ada.** Lapis kedua
+menguji hal yang sama sekali tidak terjangkau jejak tool call: apakah `search_faq`
+mengambil potongan yang tepat. Tanpa itu, jawaban bisa "grounded" terhadap bukti yang
+keliru dan tetap dinyatakan lulus.
+
+Mutu teks jawaban akhir **tidak diukur**. Yang menjaganya `must_not_contain` di dataset
+dan jaring pengaman eskalasi di kode — keduanya hanya menangkap pelanggaran yang sudah
+diantisipasi lebih dulu.
 
 ## Dua dataset
 
@@ -68,18 +71,7 @@ database yang berubah tiap seed, jadi acuan tetap justru akan salah.
 - **Groundedness** — target 100% pada klaim stok, harga, dan status pesanan
 - **Rata-rata tool call per pertanyaan** — proksi latensi; naik tajam berarti agent bingung
 
-### Lapis 2 — mutu jawaban akhir (RAGAS)
-
-Konteks pembandingnya **keluaran seluruh tool**, bukan potongan FAQ. `AnswerComposer`
-memang hanya boleh bersandar pada hasil tool, jadi itulah bukti yang sah. Menilai
-jawaban stok terhadap potongan FAQ akan menuduhnya berhalusinasi padahal datanya
-benar, hanya datang dari Postgres alih-alih dari vector store.
-
-- **Faithfulness** — ada klaim yang tidak didukung bukti?
-- **AnswerRelevancy** — jawabannya menjawab yang ditanya? Butuh model embedding juri.
-- **FactualCorrectness** — cocok dengan acuan? Hanya untuk kasus yang punya `reference`.
-
-### Lapis 3 — mutu retrieval (DeepEval)
+### Lapis 2 — mutu retrieval (DeepEval)
 
 Konteksnya hanya potongan FAQ dari vector store.
 
@@ -104,11 +96,11 @@ Laporan tersimpan di `outputs/eval_report.json`, dan trace untuk lapis 2 dan 3 d
 kali membuang waktu dan menghasilkan jawaban yang berbeda, sehingga penilaiannya tidak
 lagi mengacu pada jawaban yang sama.
 
-### Lapis 2 dan 3, di Colab
+### Lapis 2, di Colab
 
 `notebooks/00_eval_quality_colab.ipynb` menjalankan semuanya end-to-end pada runtime
 T4: memasang Ollama, menarik model, membangun index FAQ, menjalankan kedua dataset,
-lalu menilai dengan RAGAS dan DeepEval. Hasil akhirnya `outputs/quality_report.json`.
+lalu menilai retrieval dengan DeepEval. Hasilnya `outputs/quality_report.json`.
 
 Model juri `claude-haiku-4-5` lewat Claude API, terpisah dari `qwen3:1.7b` yang diuji.
 Model yang menilai jawabannya sendiri bukan pengukuran, dan juri kecil menilai terlalu
@@ -128,16 +120,16 @@ python -m venv .venv-eval
 .venv-eval\Scripts\pip install -r requirements-eval.txt
 ```
 
-## Membaca angka lapis 2 dan 3
+## Membaca angka lapis 2
 
 **Sebut juri dan yang diuji berpasangan.** Angkanya berarti "Qwen3-1.7B lokal, dinilai
 `claude-haiku-4-5`". Mengganti salah satunya membuat angka tidak lagi sebanding dengan
 run sebelumnya, jadi `judge_model` ikut tersimpan di laporan.
 
 **Juri kuat memindahkan sumber keraguan, bukan menghapusnya.** Skor rendah kini lebih
-mungkin benar-benar berasal dari sistem yang diuji. Yang tersisa: LLM-as-judge tetap
-punya bias sistematis, terutama cenderung menghukum jawaban ringkas yang sebenarnya
-benar — dan jawaban chatbot ini memang dibatasi empat kalimat.
+mungkin benar-benar berasal dari retrieval. Yang tersisa: penilaian relevansi tetap
+bergantung pada tafsir juri atas "relevan", dan potongan yang benar tapi memakai kata
+berbeda dari pertanyaannya kadang dihukum.
 
 **Korpus FAQ baru 9 potongan dari satu dokumen contoh.** Metrik retrieval di atas 16
 pertanyaan membuktikan pipeline-nya bekerja, bukan bahwa retrieval-nya bagus pada
@@ -147,9 +139,9 @@ korpus produksi.
 mengeluarkan JSON sesuai skema; kasus itu tidak ikut rata-rata. Angka besar di sini
 menunjuk ke masalah transport atau rate limit, bukan ke mutu chatbot.
 
-**Lapis 2 dan 3 memanggil API berbayar.** Lapis 1 tidak. Iterasi prompt sebaiknya
-memakai lapis 1 lebih dulu, dan penilaian mutu dijalankan saat ada yang benar-benar
-ingin diukur.
+**Lapis 2 memanggil API berbayar, lapis 1 tidak.** Yang dinilai hanya 16 kasus
+retrieval; seluruh tahap generate berjalan lokal tanpa biaya. Iterasi prompt dan
+chunking sebaiknya memakai lapis 1 lebih dulu.
 
 ## Catatan
 

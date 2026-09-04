@@ -115,7 +115,7 @@ app/
 ├── services/            # logika bisnis + composer.py (penyusun jawaban akhir)
 ├── tools/registry.py    # 8 FunctionTool + perekam audit
 ├── models/              # schema Pydantic
-├── evals/               # penilai mutu: judge · answer (RAGAS) · retrieval (DeepEval)
+├── evals/               # penilai retrieval: judge · retrieval (DeepEval) · trace
 ├── api/chat/            # routes.py · schemas.py · service.py
 └── utils/               # logger, resolusi error pihak ketiga, pembersih <think>
 supabase/migrations/     # 001–008, skema 28 tabel + view + RPC + index + RLS
@@ -240,20 +240,21 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ## Pengujian
 
-Pengukuran project ini berlapis tiga, dari yang paling murah ke paling mahal:
+Pengukuran project ini berlapis dua:
 
 | Lapis | Perkakas | Butuh juri LLM? | Menjawab pertanyaan |
 |---|---|---|---|
 | Akurasi pemilihan tool | `scripts/run_eval.py` | Tidak | Agent memilih sumber data yang benar? |
-| Mutu jawaban akhir | RAGAS | Ya, Claude API | Jawaban bersandar pada bukti, dan menjawab yang ditanya? |
 | Mutu retrieval | DeepEval | Ya, Claude API — kecuali `section_hit_rate` | Potongan yang tepat terambil, dan berperingkat benar? |
 
-Lapis pertama membaca jejak tool call, jadi deterministik dan gratis. Dua lapis
-berikutnya menjawab hal yang tidak terjangkau jejak: `must_not_contain` hanya
-menangkap frasa yang sudah diantisipasi penulis dataset, dan tidak ada satu pun
-metrik lama yang tahu apakah `search_faq` mengambil potongan yang benar. Tanpa
-lapis ketiga, jawaban bisa "grounded" terhadap bukti yang keliru dan tetap
-dinyatakan lulus.
+Lapis pertama membaca jejak tool call, jadi deterministik dan gratis. Lapis kedua
+menjawab hal yang sama sekali tidak terjangkau jejak: apakah `search_faq`
+mengambil potongan yang benar. Tanpa itu, jawaban bisa "grounded" terhadap bukti
+yang keliru dan tetap dinyatakan lulus.
+
+Mutu teks jawaban akhir **tidak diukur**. Yang menjaganya `must_not_contain` di
+dataset dan jaring pengaman eskalasi di kode — keduanya hanya menangkap
+pelanggaran yang sudah diantisipasi penulis dataset lebih dulu.
 
 ```bash
 pytest                          # unit + integration test, tanpa jaringan
@@ -276,21 +277,22 @@ Penilaian dibaca dari jejak tool call yang benar-benar terjadi
 (tabel `message_tool_calls`), bukan dari menebak isi teks jawaban.
 Detail: [`evals/README.md`](evals/README.md).
 
-### Mutu jawaban dan retrieval (RAGAS + DeepEval)
+### Mutu retrieval (DeepEval)
 
 Run `run_eval.py` juga menulis `outputs/eval_trace.jsonl`: pertanyaan, jawaban,
 bukti, dan potongan yang terambil untuk tiap kasus. Berkas itu yang dinilai
-lapis dua dan tiga.
+lapis dua.
 
-Dua jenis konteks dicatat terpisah, dan pemisahan itu menentukan benar-tidaknya
-angkanya. RAGAS menilai jawaban terhadap **keluaran seluruh tool** — itulah bukti
-yang dilihat `AnswerComposer`. DeepEval menilai retrieval terhadap **potongan FAQ
-saja**. Kalau keduanya disatukan, jawaban stok akan dituduh berhalusinasi karena
-angkanya tidak ada di potongan FAQ, padahal datanya sah dan datang dari Postgres.
+Yang dinilai hanya **potongan FAQ dari vector store**, bukan seluruh keluaran
+tool. Data stok dan pesanan datang dari Postgres lewat RPC, bukan dari retrieval,
+jadi memasukkannya akan mengukur hal yang berbeda dari yang dimaksud. Selain tiga
+metrik yang dinilai juri, `section_hit_rate` dihitung deterministik dari heading
+dokumen FAQ — ia jadi pembanding saat skor juri terlihat mencurigakan.
 
 Jalankan lewat [`notebooks/00_eval_quality_colab.ipynb`](notebooks/00_eval_quality_colab.ipynb)
 pada runtime Colab T4. Notebook memasang Ollama, menarik model, membangun index
-FAQ, menjalankan kedua dataset, lalu menilai — hasilnya `outputs/quality_report.json`.
+FAQ, menjalankan kedua dataset, lalu menilai retrieval — hasilnya
+`outputs/quality_report.json`.
 
 Model juri `claude-haiku-4-5` lewat Claude API, terpisah dari `qwen3:1.7b` yang
 diuji. Model yang menilai jawabannya sendiri bukan pengukuran, dan juri kecil
@@ -304,8 +306,8 @@ kalau hanya menjalankan chatbot. Embedding juri tetap lokal, karena Anthropic
 tidak menyediakan API embedding dan metrik yang memakainya hanya mengukur
 kemiripan vektor.
 
-Dependency penilai berat (langchain, datasets, grpcio, opentelemetry), jadi
-dipasang di venv terpisah lewat `requirements-eval.txt`, bukan di venv utama.
+Dependency penilai berat (grpcio, opentelemetry, posthog), jadi dipasang di venv
+terpisah lewat `requirements-eval.txt`, bukan di venv utama.
 
 **Tiga hal yang harus ikut terbaca bersama angkanya:**
 
@@ -429,13 +431,13 @@ sebenarnya:
 | `app/tools/registry.py`, `app/models/chat.py` | `ToolObservation`: hasil tool utuh untuk composer |
 | `app/utils/errors.py`, `app/api/chat/routes.py` | Taksonomi error Ollama menggantikan error `anthropic` |
 | `app/utils/text.py` | Pembersih blok `<think>`; tidak diperlukan varian API |
-| `app/evals/` | Penilai RAGAS + DeepEval; belum ada di varian API |
+| `app/evals/` | Penilai retrieval DeepEval; belum ada di varian API |
 | `scripts/smoke_llm.py` | Gerbang tiga lapis termasuk probe tool calling |
 | `requirements.txt`, `requirements-eval.txt` | `llama-index-llms-ollama` + `ollama` menggantikan `anthropic`; dependency penilai di venv terpisah |
 
 Yang **tidak** berubah: 28 tabel dan seluruh migrasi, 4 view + 4 RPC, delapan
 tool beserta deskripsinya, jaring pengaman eskalasi, dataset eval 41 kasus, dan
-cara skoringnya. Lapis penilaian RAGAS dan DeepEval memakai trace yang formatnya
+cara skoringnya. Lapis penilaian DeepEval memakai trace yang formatnya
 netral penyedia, jadi varian API bisa memakainya tanpa perubahan begitu jurinya
 disambungkan.
 

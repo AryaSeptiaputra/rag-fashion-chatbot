@@ -1,13 +1,12 @@
-# Dependency penilaian mutu (RAGAS + DeepEval).
+# Dependency penilaian mutu retrieval (DeepEval).
 #
 # Dipasang di venv TERPISAH, bukan di venv utama:
 #     python -m venv .venv-eval
 #     .venv-eval\Scripts\pip install -r requirements-eval.txt
 #
-# Alasannya, RAGAS menarik langchain, langchain-community, dan datasets>=4.0.0,
-# sedangkan DeepEval menarik grpcio, opentelemetry, dan posthog. Meresolusi
-# semua itu terhadap pin llama-index, chromadb, dan streamlit yang sekarang
-# bekerja adalah risiko yang tidak perlu diambil demi kenyamanan satu venv.
+# DeepEval menarik grpcio, opentelemetry, dan posthog. Meresolusi semua itu
+# terhadap pin llama-index, chromadb, dan streamlit yang sekarang bekerja adalah
+# risiko yang tidak perlu diambil demi kenyamanan satu venv.
 
 -r requirements.txt
 
@@ -16,29 +15,18 @@
 -e .
 
 # Penilai
-ragas==0.4.3
 deepeval==4.2.1
 
 # Model juri. Ini satu-satunya bagian project yang menyentuh API berbayar, dan
 # hanya harness eval yang memakainya -- chatbot-nya tetap berjalan penuh di
 # lokal tanpa kunci API.
 #
-# Dipin ke 0.93.0 mengikuti instructor, yang dipakai RAGAS untuk keluaran
-# terstruktur dan mem-pin anthropic PERSIS di versi itu (bukan rentang).
-# Versi ini juga masih memakai httpx klasik, jadi httpx2 tidak ikut masuk dan
-# httpx==0.28.1 di requirements.txt tetap terpakai.
+# Ditahan di 0.x dengan sengaja: anthropic 1.x pindah dari httpx ke httpx2, dan
+# menariknya kembali ke venv ini akan menghadirkan dua pustaka HTTP berdampingan
+# tanpa alasan. 0.93.0 memakai httpx<1, jadi httpx==0.28.1 di requirements.txt
+# tetap yang terpakai.
 anthropic==0.93.0
-# Dibutuhkan instructor.from_anthropic untuk mem-parse keluaran bermode XML.
-xmltodict==1.0.4
 
-# Transport HTTP ke endpoint kompatibel OpenAI milik Ollama -- bukan akun
-# OpenAI. Hanya dipakai untuk embedding juri, karena Anthropic tidak
-# menyediakan API embedding.
-#
-# Ditahan di 2.x dengan sengaja: instructor menuntut openai<3.0.0. Menaikkan
-# ke 3.x akan menggagalkan resolusi.
-openai==2.54.0
-
-# Grafik ringkasan di notebook. pandas tidak perlu didaftarkan; ia sudah ikut
-# lewat datasets milik RAGAS, dan itu versi yang sama dipakai result.to_pandas().
+# Tabel ringkasan dan grafik di notebook.
+pandas==3.0.5
 matplotlib==3.11.1

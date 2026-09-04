@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     composer_temperature: float = 0.1
     composer_history_turns: int = 2
 
-    # Model juri untuk RAGAS dan DeepEval, memakai Claude API.
+    # Model juri DeepEval, memakai Claude API.
     #
     # Ini satu-satunya tempat di branch ini yang menyentuh API berbayar, dan
     # itu disengaja: juri adalah alat ukur, bukan bagian produk. Chatbot-nya
@@ -45,10 +45,6 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     judge_model: str = "claude-haiku-4-5"
     judge_temperature: float = 0.0
-
-    # Embedding juri tetap lokal: Anthropic tidak menyediakan API embedding,
-    # dan metrik yang memakainya hanya mengukur kemiripan, bukan menilai.
-    judge_embedding_model: str = "nomic-embed-text"
 
     supabase_url: str = ""
     supabase_service_key: str = ""

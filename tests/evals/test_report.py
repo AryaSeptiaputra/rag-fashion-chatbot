@@ -10,8 +10,8 @@ def case(case_id: str, **scores: float) -> CaseScore:
 
 def test_aggregate_is_the_mean_per_metric() -> None:
     report = QualityReport.build(
-        metric_family="ragas-answer",
-        judge_model="qwen2.5:7b-instruct",
+        metric_family="deepeval-retrieval",
+        judge_model="claude-haiku-4-5",
         cases=[case("a", faithfulness=1.0), case("b", faithfulness=0.5)],
     )
 
@@ -26,8 +26,8 @@ def test_unscored_case_is_not_counted_as_zero() -> None:
     failed = CaseScore(case_id="b", question="q", unscored=["faithfulness"])
 
     report = QualityReport.build(
-        metric_family="ragas-answer",
-        judge_model="qwen2.5:7b-instruct",
+        metric_family="deepeval-retrieval",
+        judge_model="claude-haiku-4-5",
         cases=[scored, failed],
     )
 
@@ -38,7 +38,7 @@ def test_unscored_case_is_not_counted_as_zero() -> None:
 def test_metric_scored_nowhere_is_absent_from_aggregates() -> None:
     report = QualityReport.build(
         metric_family="deepeval-retrieval",
-        judge_model="qwen2.5:7b-instruct",
+        judge_model="claude-haiku-4-5",
         cases=[CaseScore(case_id="a", question="q", unscored=["ContextualRecall"])],
     )
 
@@ -49,7 +49,7 @@ def test_metric_scored_nowhere_is_absent_from_aggregates() -> None:
 def test_metrics_are_aggregated_independently() -> None:
     report = QualityReport.build(
         metric_family="deepeval-retrieval",
-        judge_model="qwen2.5:7b-instruct",
+        judge_model="claude-haiku-4-5",
         cases=[
             case("a", relevancy=1.0, recall=0.0),
             CaseScore(case_id="b", question="q", scores={"relevancy": 0.0}),
@@ -61,8 +61,8 @@ def test_metrics_are_aggregated_independently() -> None:
 
 def test_worst_cases_are_ordered_lowest_first() -> None:
     report = QualityReport.build(
-        metric_family="ragas-answer",
-        judge_model="qwen2.5:7b-instruct",
+        metric_family="deepeval-retrieval",
+        judge_model="claude-haiku-4-5",
         cases=[case("a", f=0.9), case("b", f=0.1), case("c", f=0.5)],
     )
 
@@ -71,8 +71,8 @@ def test_worst_cases_are_ordered_lowest_first() -> None:
 
 def test_worst_cases_skips_cases_without_that_metric() -> None:
     report = QualityReport.build(
-        metric_family="ragas-answer",
-        judge_model="qwen2.5:7b-instruct",
+        metric_family="deepeval-retrieval",
+        judge_model="claude-haiku-4-5",
         cases=[case("a", f=0.9), CaseScore(case_id="b", question="q")],
     )
 
@@ -83,11 +83,11 @@ def test_judge_model_travels_with_the_numbers() -> None:
     # Angka dari juri berbeda tidak sebanding. Nama jurinya harus menempel di
     # laporan, bukan diingat terpisah.
     report = QualityReport.build(
-        metric_family="ragas-answer",
-        judge_model="qwen2.5:7b-instruct",
+        metric_family="deepeval-retrieval",
+        judge_model="claude-haiku-4-5",
         cases=[case("a", f=1.0)],
-        notes=["ResponseRelevancy dilewati."],
+        notes=["ContextualRecall dilewati pada 2 kasus tanpa acuan."],
     )
 
-    assert report.judge_model == "qwen2.5:7b-instruct"
-    assert report.notes == ["ResponseRelevancy dilewati."]
+    assert report.judge_model == "claude-haiku-4-5"
+    assert report.notes == ["ContextualRecall dilewati pada 2 kasus tanpa acuan."]
