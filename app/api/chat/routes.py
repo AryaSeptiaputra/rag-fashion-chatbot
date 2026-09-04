@@ -1,6 +1,5 @@
 """Endpoint HTTP untuk percakapan chatbot."""
 
-import anthropic
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.chat.schemas import (
@@ -11,10 +10,14 @@ from app.api.chat.schemas import (
 )
 from app.api.chat.service import get_chat_service
 from app.config import settings
-from app.dependencies import get_chroma_client, get_supabase_client
+from app.dependencies import get_chroma_client, get_supabase_client, probe_llm_ready
 from app.repositories.base import RepositoryError
 from app.services.chatbot import ChatbotService
-from app.utils.errors import COLLECTION_MISSING_ERRORS
+from app.utils.errors import (
+    COLLECTION_MISSING_ERRORS,
+    LLM_UNAVAILABLE_ERRORS,
+    describe_llm_error,
+)
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -38,7 +41,7 @@ async def chat(
 
     Raises:
         HTTPException: 503 kalau index FAQ atau kredensial belum siap,
-            502 kalau akses database gagal.
+            502 kalau akses database atau model lokal gagal.
     """
     try:
         reply = await service.answer(
@@ -49,28 +52,13 @@ async def chat(
     except RepositoryError as exc:
         logger.error(f"Akses database gagal: {exc}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except anthropic.RateLimitError as exc:
-        logger.warning(f"Claude API membatasi laju permintaan: {exc}")
-        raise HTTPException(
-            status_code=429,
-            detail="Terlalu banyak permintaan ke layanan AI. Coba lagi sebentar lagi.",
-        ) from exc
-    except anthropic.APIStatusError as exc:
-        # Termasuk saldo kredit habis, API key ditolak, dan gangguan sisi Claude.
-        # Tanpa penanganan ini, kegagalan tersebut muncul sebagai HTTP 500 tanpa
-        # petunjuk apa pun bagi operator.
-        logger.error(
-            f"Claude API mengembalikan {exc.status_code}: {exc.message}", exc_info=True
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Layanan AI tidak bisa dihubungi ({exc.status_code}): {exc.message}",
-        ) from exc
-    except anthropic.APIConnectionError as exc:
-        logger.error("Gagal terhubung ke Claude API", exc_info=True)
-        raise HTTPException(
-            status_code=502, detail="Layanan AI tidak bisa dihubungi."
-        ) from exc
+    except LLM_UNAVAILABLE_ERRORS as exc:
+        # Server Ollama mati, model belum di-pull, atau jawabannya tidak selesai
+        # dalam batas waktu. Tanpa penanganan ini ketiganya muncul sebagai HTTP
+        # 500 tanpa petunjuk apa pun bagi operator.
+        detail = describe_llm_error(exc)
+        logger.error(f"LLM lokal tidak bisa dipakai: {detail}", exc_info=True)
+        raise HTTPException(status_code=502, detail=detail) from exc
     except (ValueError, RuntimeError) as exc:
         logger.error(f"Layanan belum siap: {exc}", exc_info=True)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -92,11 +80,13 @@ async def chat(
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    """Laporkan kesiapan komponen: index FAQ dan koneksi Supabase.
+    """Laporkan kesiapan komponen: index FAQ, Supabase, dan LLM lokal.
 
-    Kedua komponen diperiksa terpisah supaya kegagalan satu tidak menutupi
-    status yang lain. Hitungan chunk dibaca langsung dari ChromaDB agar
-    health check tidak perlu memuat model embedding yang berat.
+    Ketiganya diperiksa terpisah supaya kegagalan satu tidak menutupi status
+    yang lain. Hitungan chunk dibaca langsung dari ChromaDB agar health check
+    tidak perlu memuat model embedding yang berat. Kesiapan LLM ikut diperiksa
+    karena pada varian lokal penyebab gagal paling sering adalah server Ollama
+    belum jalan -- itu harus terlihat sebelum pembeli mengirim pesan.
 
     Returns:
         Status layanan; "degraded" kalau ada komponen yang belum siap.
@@ -115,10 +105,14 @@ def health() -> HealthResponse:
     except ValueError as exc:
         logger.warning(f"Supabase belum siap: {exc}")
 
-    is_ready = faq_chunks > 0 and supabase_connected
+    llm_ready, llm_detail = probe_llm_ready()
+
+    is_ready = faq_chunks > 0 and supabase_connected and llm_ready
     return HealthResponse(
         status="ok" if is_ready else "degraded",
         llm_model=settings.llm_model,
+        llm_ready=llm_ready,
+        llm_detail=llm_detail,
         faq_chunks=faq_chunks,
         supabase_connected=supabase_connected,
     )

@@ -1,30 +1,19 @@
-"""Test pemetaan error Claude API ke status HTTP.
+"""Test pemetaan kegagalan LLM lokal ke status HTTP.
 
-Regresi yang dijaga: saat saldo kredit Anthropic habis, endpoint /chat
-mengembalikan HTTP 500 tanpa petunjuk apa pun. Operator tidak punya cara tahu
-bahwa masalahnya ada di tagihan, bukan di aplikasi.
+Regresi yang dijaga: saat server Ollama mati atau model belum di-pull,
+endpoint /chat mengembalikan HTTP 500 tanpa petunjuk apa pun. Operator tidak
+punya cara tahu bahwa masalahnya ada di model lokal, bukan di aplikasi.
 """
 
-import anthropic
-import httpx2 as httpx
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from ollama import ResponseError
 
 from app.api.chat.service import get_chat_service
 from app.api.main import create_app
 from app.models.chat import AgentReply
 from app.repositories.base import RepositoryError
-
-
-def build_api_error(status_code: int, message: str) -> anthropic.APIStatusError:
-    """Bangun APIStatusError seperti yang dilempar SDK anthropic."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx.Response(
-        status_code,
-        request=request,
-        json={"type": "error", "error": {"type": "invalid_request_error", "message": message}},
-    )
-    return anthropic.APIStatusError(message, response=response, body=None)
 
 
 class FailingChatbotService:
@@ -52,42 +41,25 @@ def post_chat(client: TestClient) -> httpx.Response:
     )
 
 
-def test_credit_exhausted_becomes_502_with_reason() -> None:
-    error = build_api_error(
-        400, "Your credit balance is too low to access the Anthropic API."
-    )
-
-    response = post_chat(client_for(error))
+def test_server_down_becomes_502_with_fix_instruction() -> None:
+    response = post_chat(client_for(httpx.ConnectError("connection refused")))
 
     assert response.status_code == 502
-    assert "credit balance" in response.json()["detail"]
+    assert "ollama serve" in response.json()["detail"]
 
 
-def test_rate_limit_becomes_429() -> None:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    http_response = httpx.Response(429, request=request, json={"error": {"message": "slow down"}})
-    error = anthropic.RateLimitError("rate limited", response=http_response, body=None)
-
-    response = post_chat(client_for(error))
-
-    assert response.status_code == 429
-
-
-def test_upstream_outage_becomes_502() -> None:
-    error = build_api_error(529, "Overloaded")
-
-    response = post_chat(client_for(error))
+def test_model_not_pulled_becomes_502_with_pull_instruction() -> None:
+    response = post_chat(client_for(ResponseError('model "qwen3:1.7b" not found')))
 
     assert response.status_code == 502
+    assert "ollama pull" in response.json()["detail"]
 
 
-def test_connection_failure_becomes_502() -> None:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    error = anthropic.APIConnectionError(request=request)
-
-    response = post_chat(client_for(error))
+def test_timeout_becomes_502_and_says_so() -> None:
+    response = post_chat(client_for(httpx.ReadTimeout("terlalu lama")))
 
     assert response.status_code == 502
+    assert "detik" in response.json()["detail"]
 
 
 def test_database_failure_still_becomes_502() -> None:
@@ -102,10 +74,19 @@ def test_service_not_ready_still_becomes_503() -> None:
     assert response.status_code == 503
 
 
-@pytest.mark.parametrize("status_code", [400, 404, 500, 529])
-def test_no_anthropic_error_leaks_as_500(status_code: int) -> None:
-    # HTTP 500 berarti bug aplikasi. Kegagalan pihak ketiga tidak boleh
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ConnectError("refused"),
+        httpx.ConnectTimeout("timeout saat connect"),
+        httpx.ReadTimeout("timeout saat baca"),
+        ResponseError("boom"),
+        ConnectionError("socket putus"),
+    ],
+)
+def test_no_llm_failure_leaks_as_500(error: Exception) -> None:
+    # HTTP 500 berarti bug aplikasi. Kegagalan model lokal tidak boleh
     # menyamar sebagai bug kita.
-    response = post_chat(client_for(build_api_error(status_code, "boom")))
+    response = post_chat(client_for(error))
 
-    assert response.status_code != 500
+    assert response.status_code == 502

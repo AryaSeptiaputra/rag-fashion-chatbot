@@ -14,7 +14,7 @@ from typing import Any
 
 from llama_index.core.tools import FunctionTool
 
-from app.models.chat import ToolCallRecord
+from app.models.chat import ToolCallRecord, ToolObservation
 from app.repositories.base import RepositoryError
 from app.services.catalog import CatalogService
 from app.services.inventory import InventoryService
@@ -32,10 +32,29 @@ class ToolCallRecorder:
 
     Instance dibuat baru tiap request supaya jejak antar percakapan tidak
     tercampur.
+
+    Dua koleksi diisi bersamaan dari sumber yang sama: records untuk audit dan
+    eval (hasilnya dipotong, ikut tersimpan ke database), observations untuk
+    composer (hasilnya utuh, tidak pernah disimpan).
     """
 
     def __init__(self) -> None:
         self.records: list[ToolCallRecord] = []
+        self.observations: list[ToolObservation] = []
+        self._pending_contexts: list[str] = []
+
+    def attach_contexts(self, contexts: list[str]) -> None:
+        """Titipkan potongan dokumen mentah untuk observasi yang sedang dibentuk.
+
+        Dipanggil dari dalam badan tool, sebelum tool itu mengembalikan hasil.
+        Slot ini dikosongkan oleh pembungkus begitu observasinya dibuat, jadi
+        potongan selalu menempel pada tool call yang benar walau satu giliran
+        memanggil beberapa tool sekaligus.
+
+        Args:
+            contexts: Potongan dokumen apa adanya, sebelum diformat untuk LLM.
+        """
+        self._pending_contexts = list(contexts)
 
     def wrap(self, func: Callable[..., str], tool_name: str) -> Callable[..., str]:
         """Bungkus fungsi tool supaya argumen, hasil, dan latensinya tercatat.
@@ -56,6 +75,7 @@ class ToolCallRecorder:
         @functools.wraps(func)
         def _wrapped(*args: Any, **kwargs: Any) -> str:
             started = time.perf_counter()
+            self._pending_contexts = []
             try:
                 result = func(*args, **kwargs)
                 is_error = False
@@ -68,15 +88,26 @@ class ToolCallRecorder:
                 is_error = True
 
             latency_ms = int((time.perf_counter() - started) * 1000)
+            arguments = self._bind_arguments(signature, args, kwargs)
             self.records.append(
                 ToolCallRecord(
                     tool_name=tool_name,
-                    arguments=self._bind_arguments(signature, args, kwargs),
+                    arguments=arguments,
                     result_summary=result[:_MAX_SUMMARY_CHARS],
                     is_error=is_error,
                     latency_ms=latency_ms,
                 )
             )
+            self.observations.append(
+                ToolObservation(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result=result,
+                    is_error=is_error,
+                    contexts=self._pending_contexts,
+                )
+            )
+            self._pending_contexts = []
             logger.info(f"Tool {tool_name} selesai dalam {latency_ms} ms")
             return result
 
@@ -98,6 +129,8 @@ class ToolCallRecorder:
     def reset(self) -> None:
         """Kosongkan jejak yang sudah terkumpul."""
         self.records.clear()
+        self.observations.clear()
+        self._pending_contexts = []
 
 
 def build_tools(
@@ -139,6 +172,10 @@ def build_tools(
             Kutipan FAQ yang relevan beserta nama file dan halaman sumbernya.
         """
         nodes = faq_retriever.retrieve(query)
+        # Potongan mentah dititipkan sebelum diformat: harness eval menilai
+        # mutu retrieval per potongan, dan teks berformat "[Kutipan 1 - sumber:
+        # ...]" akan dinilai sebagai bagian dari isi dokumen.
+        recorder.attach_contexts([node.get_content().strip() for node in nodes])
         return faq_retriever.format_for_llm(nodes)
 
     def search_products(

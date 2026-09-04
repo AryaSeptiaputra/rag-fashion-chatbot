@@ -9,7 +9,7 @@ Jalankan: streamlit run ui/streamlit_app.py
 
 import uuid
 
-import httpx2 as httpx
+import httpx
 import streamlit as st
 
 from app.config import settings
@@ -74,6 +74,10 @@ def render_sidebar() -> str:
             payload = health.json()
             st.metric("Chunk FAQ ter-index", payload.get("faq_chunks", 0))
             st.write(f"Model: `{payload.get('llm_model', '-')}`")
+            llm_ready = bool(payload.get("llm_ready"))
+            st.write("LLM lokal: " + ("siap" if llm_ready else "belum siap"))
+            if not llm_ready:
+                st.warning(payload.get("llm_detail", "Ollama belum siap."))
             st.write(
                 "Supabase: "
                 + ("terhubung" if payload.get("supabase_connected") else "belum siap")

@@ -8,6 +8,7 @@ def build_service() -> ChatbotService:
     """Rakit ChatbotService kosong; hanya method statis yang diuji di sini."""
     return ChatbotService(
         llm=None,  # type: ignore[arg-type]
+        composer=None,  # type: ignore[arg-type]
         faq_retriever=None,  # type: ignore[arg-type]
         catalog_service=None,  # type: ignore[arg-type]
         inventory_service=None,  # type: ignore[arg-type]

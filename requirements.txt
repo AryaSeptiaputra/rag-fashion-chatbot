@@ -1,12 +1,12 @@
 # Framework chatbot & RAG
 llama-index-core==0.14.24
-llama-index-llms-anthropic==0.12.0
+llama-index-llms-ollama==0.11.0
 llama-index-embeddings-huggingface==0.8.0
 llama-index-vector-stores-chroma==0.6.0
 llama-index-readers-file==0.7.0
 
-# LLM provider
-anthropic==1.3.0
+# LLM provider lokal
+ollama==0.6.2
 
 # Vector database & embedding lokal
 chromadb==1.5.9
@@ -18,6 +18,9 @@ supabase==2.31.0
 # API layer
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
+
+# HTTP client: probe kesiapan Ollama, dan panggilan REST API dari Streamlit
+httpx==0.28.1
 
 # Config, logging, resiliency
 pydantic-settings==2.15.0

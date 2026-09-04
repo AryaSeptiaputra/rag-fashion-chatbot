@@ -18,10 +18,29 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    anthropic_api_key: str = ""
-    llm_model: str = "claude-haiku-4-5"
-    llm_max_tokens: int = 2048
+    ollama_base_url: str = "http://localhost:11434"
+
+    # LLM utama: memilih dan memanggil tool.
+    llm_model: str = "qwen3:1.7b"
+    llm_max_tokens: int = 1024
     llm_temperature: float = 0.2
+    llm_context_window: int = 8192
+    llm_request_timeout: float = 180.0
+    llm_keep_alive: str = "10m"
+    llm_thinking: bool = False
+
+    # LLM penyusun jawaban akhir: tanpa tool, sampling lebih dingin.
+    composer_model: str = "qwen3:1.7b"
+    composer_max_tokens: int = 512
+    composer_temperature: float = 0.1
+    composer_history_turns: int = 2
+
+    # Model juri untuk RAGAS dan DeepEval. Sengaja dipisah dari model yang
+    # diuji: penilai bukan bagian produk, dan memakai model yang sama untuk
+    # menjawab sekaligus menilai jawabannya sendiri bukan pengukuran.
+    judge_model: str = "qwen2.5:7b-instruct"
+    judge_embedding_model: str = "nomic-embed-text"
+    judge_temperature: float = 0.0
 
     supabase_url: str = ""
     supabase_service_key: str = ""
@@ -37,7 +56,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 64
     retrieval_top_k: int = 4
 
-    agent_max_iterations: int = 8
+    agent_max_iterations: int = 5
     history_turn_limit: int = 10
 
     log_format: str = "text"
@@ -58,6 +77,11 @@ class Settings(BaseSettings):
         """Path absolut direktori sumber dokumen FAQ."""
         return self._resolve(self.faq_source_dir)
 
+    @property
+    def ollama_tags_url(self) -> str:
+        """URL endpoint daftar model yang sudah ter-pull di Ollama."""
+        return f"{self.ollama_base_url.rstrip('/')}/api/tags"
+
     def require_supabase(self) -> tuple[str, str]:
         """Ambil kredensial Supabase, gagal keras kalau belum diset.
 
@@ -72,19 +96,6 @@ class Settings(BaseSettings):
                 "SUPABASE_URL dan SUPABASE_SERVICE_KEY wajib diisi di .env"
             )
         return self.supabase_url, self.supabase_service_key
-
-    def require_anthropic_key(self) -> str:
-        """Ambil API key Anthropic, gagal keras kalau belum diset.
-
-        Returns:
-            Nilai ANTHROPIC_API_KEY.
-
-        Raises:
-            ValueError: Kalau ANTHROPIC_API_KEY kosong.
-        """
-        if not self.anthropic_api_key:
-            raise ValueError("ANTHROPIC_API_KEY wajib diisi di .env")
-        return self.anthropic_api_key
 
     @staticmethod
     def _resolve(raw_path: str) -> Path:

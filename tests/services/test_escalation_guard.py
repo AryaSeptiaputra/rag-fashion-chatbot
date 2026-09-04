@@ -29,6 +29,7 @@ def build_service(memory: SpyMemory) -> ChatbotService:
     """Rakit ChatbotService dengan hanya memory yang berfungsi."""
     return ChatbotService(
         llm=None,  # type: ignore[arg-type]
+        composer=None,  # type: ignore[arg-type]
         faq_retriever=None,  # type: ignore[arg-type]
         catalog_service=None,  # type: ignore[arg-type]
         inventory_service=None,  # type: ignore[arg-type]

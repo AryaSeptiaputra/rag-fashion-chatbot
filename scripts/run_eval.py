@@ -17,13 +17,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import anthropic
-
 from app.api.chat.service import build_chatbot_service
-from app.config import PROJECT_ROOT
+from app.config import PROJECT_ROOT, settings
+from app.dependencies import probe_llm_ready
+from app.evals.trace import EvalTrace, write_traces
 from app.models.chat import AgentReply
 from app.services.chatbot import ChatbotService
 from app.utils.console import configure_console_encoding
+from app.utils.errors import LLM_UNAVAILABLE_ERRORS, describe_llm_error
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -72,6 +73,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=PROJECT_ROOT / "outputs" / "eval_report.json",
         help="Path file laporan JSON",
+    )
+    parser.add_argument(
+        "--trace-output",
+        type=Path,
+        default=PROJECT_ROOT / "outputs" / "eval_trace.jsonl",
+        help=(
+            "Path file trace JSONL untuk penilaian RAGAS dan DeepEval. "
+            "Ditulis di run yang sama supaya chatbot tidak perlu dijalankan dua kali."
+        ),
     )
     return parser.parse_args()
 
@@ -158,7 +168,7 @@ def evaluate_case(case: dict[str, Any], reply: AgentReply) -> CaseResult:
 
 async def run_case(
     service: ChatbotService, case: dict[str, Any]
-) -> CaseResult:
+) -> tuple[CaseResult, EvalTrace]:
     """Jalankan satu kasus uji terhadap chatbot.
 
     Setiap kasus memakai session_id unik supaya riwayat antar-kasus tidak
@@ -169,7 +179,7 @@ async def run_case(
         case: Definisi kasus dari dataset.
 
     Returns:
-        Hasil evaluasi kasus.
+        Hasil evaluasi kasus, beserta trace untuk penilaian mutu lanjutan.
     """
     session_id = f"eval-{case.get('id', uuid.uuid4().hex)}-{uuid.uuid4().hex[:8]}"
 
@@ -179,7 +189,7 @@ async def run_case(
     reply = await service.answer(
         session_id=session_id, message=str(case["question"])
     )
-    return evaluate_case(case, reply)
+    return evaluate_case(case, reply), EvalTrace.from_case(case, reply)
 
 
 def print_report(results: list[CaseResult]) -> dict[str, Any]:
@@ -208,6 +218,10 @@ def print_report(results: list[CaseResult]) -> dict[str, Any]:
     print("\n" + "=" * 72)
     print("LAPORAN EVAL CHATBOT")
     print("=" * 72)
+    print(
+        f"Model agent / composer       : "
+        f"{settings.llm_model} / {settings.composer_model}"
+    )
     print(f"Kasus diuji                  : {metrics['total_cases']}")
     print(f"Akurasi pemilihan tool       : {metrics['tool_accuracy']:.1%} (target >= 90%)")
     print(f"Groundedness                 : {metrics['groundedness']:.1%} (target 100%)")
@@ -243,6 +257,10 @@ def save_report(
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
+        # Model ikut dicatat supaya laporan dari branch berbeda bisa
+        # dibandingkan tanpa menebak run mana milik model mana.
+        "llm_model": settings.llm_model,
+        "composer_model": settings.composer_model,
         "metrics": metrics,
         "cases": [
             {
@@ -282,6 +300,12 @@ async def run_all(args: argparse.Namespace) -> int:
         logger.error("Tidak ada kasus yang cocok dengan filter yang diberikan")
         return 1
 
+    llm_ready, llm_detail = probe_llm_ready()
+    if not llm_ready:
+        logger.error(llm_detail)
+        logger.error("Eval dibatalkan sebelum kasus pertama dijalankan.")
+        return 1
+
     try:
         service = build_chatbot_service()
     except ValueError as exc:
@@ -289,20 +313,22 @@ async def run_all(args: argparse.Namespace) -> int:
         return 1
 
     results: list[CaseResult] = []
+    traces: list[EvalTrace] = []
     for index, case in enumerate(cases, start=1):
         case_id = case.get("id", "?")
         logger.info(f"[{index}/{len(cases)}] Menjalankan kasus {case_id}")
         try:
-            results.append(await run_case(service, case))
-        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
-            logger.error(f"Kredensial Claude ditolak: {exc.message}")
-            logger.error("Eval dihentikan; perbaiki ANTHROPIC_API_KEY lalu jalankan lagi.")
-            return 1
-        except anthropic.APIStatusError as exc:
-            # Saldo kredit habis atau gangguan sisi Claude akan berulang di setiap
-            # kasus berikutnya, jadi tidak ada gunanya melanjutkan 40 kasus lagi.
-            logger.error(f"Claude API mengembalikan {exc.status_code}: {exc.message}")
+            result, trace = await run_case(service, case)
+            results.append(result)
+            traces.append(trace)
+        except LLM_UNAVAILABLE_ERRORS as exc:
+            # Server Ollama mati atau model hilang akan berulang di setiap kasus
+            # berikutnya, jadi tidak ada gunanya melanjutkan 40 kasus lagi. Trace
+            # yang sudah terkumpul tetap ditulis supaya kasus yang sudah berjalan
+            # tidak perlu diulang setelah servernya dibetulkan.
+            logger.error(describe_llm_error(exc))
             logger.error("Eval dihentikan sebelum kasus berikutnya dijalankan.")
+            write_traces(args.trace_output, traces)
             return 1
         except (RuntimeError, ValueError) as exc:
             logger.error(f"Kasus {case_id} gagal dijalankan: {exc}", exc_info=True)
@@ -322,6 +348,8 @@ async def run_all(args: argparse.Namespace) -> int:
 
     metrics = print_report(results)
     save_report(args.output, metrics, results)
+    write_traces(args.trace_output, traces)
+    print(f"Trace untuk penilaian mutu disimpan di {args.trace_output}")
 
     return 0 if metrics["overall_pass_rate"] == 1.0 else 1
 

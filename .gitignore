@@ -1,6 +1,10 @@
-# Environment
+# Environment. Pola .env.* menutup salinan per-varian (mis. .env.claude-api)
+# yang menyimpan kredensial branch lain; .env.example tetap ikut dikomit.
 .env
+.env.*
+!.env.example
 .venv/
+.venv-eval/
 venv/
 
 # Python

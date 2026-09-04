@@ -9,7 +9,7 @@ def configure_console_encoding() -> None:
 
     Console Windows memakai code page ANSI (cp1252 untuk locale Indonesia),
     yang tidak bisa mencetak emoji maupun sebagian tanda baca tipografis.
-    Jawaban Claude rutin memuat keduanya, sehingga print() bisa melempar
+    Jawaban model rutin memuat keduanya, sehingga print() bisa melempar
     UnicodeEncodeError dan menghentikan script di tengah jalan -- terutama
     scripts/run_eval.py yang mencetak jawaban apa adanya.
 

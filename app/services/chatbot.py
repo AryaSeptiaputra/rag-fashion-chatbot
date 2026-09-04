@@ -3,18 +3,20 @@
 import re
 
 from llama_index.core.agent.workflow import FunctionAgent
-from llama_index.llms.anthropic import Anthropic
+from llama_index.core.llms import LLM
 
 from app.config import settings
 from app.models.chat import AgentReply, ToolCallRecord
 from app.prompts.system import SYSTEM_PROMPT
 from app.services.catalog import CatalogService
+from app.services.composer import AnswerComposer
 from app.services.inventory import InventoryService
 from app.services.memory import ConversationMemory
 from app.services.order import OrderService
 from app.services.retrieval import FAQRetriever
 from app.tools.registry import ToolCallRecorder, build_tools
 from app.utils.logger import setup_logger
+from app.utils.text import strip_thinking
 
 logger = setup_logger(__name__)
 
@@ -46,7 +48,8 @@ class ChatbotService:
 
     def __init__(
         self,
-        llm: Anthropic,
+        llm: LLM,
+        composer: AnswerComposer,
         faq_retriever: FAQRetriever,
         catalog_service: CatalogService,
         inventory_service: InventoryService,
@@ -54,6 +57,7 @@ class ChatbotService:
         memory: ConversationMemory,
     ) -> None:
         self.llm = llm
+        self.composer = composer
         self.faq_retriever = faq_retriever
         self.catalog_service = catalog_service
         self.inventory_service = inventory_service
@@ -100,7 +104,18 @@ class ChatbotService:
         )
         response = await handler
 
-        answer = str(response).strip()
+        # Jawaban tahap agent hanya dipakai kalau composer gagal. Selebihnya
+        # dibuang: yang dikirim ke pembeli harus jawaban yang disusun semata
+        # dari hasil tool, bukan dari kalimat yang dirangkai sambil memilih tool.
+        agent_answer = strip_thinking(str(response))
+        answer = (
+            await self.composer.compose(
+                question=message,
+                observations=recorder.observations,
+                history=history,
+            )
+            or agent_answer
+        )
         tool_calls = list(recorder.records)
 
         self.memory.record_turn(
@@ -119,7 +134,18 @@ class ChatbotService:
             f"Giliran selesai dengan {len(tool_calls)} tool call: "
             f"{[call.tool_name for call in tool_calls]}"
         )
-        return AgentReply(answer=answer, tool_calls=tool_calls)
+        return AgentReply(
+            answer=answer,
+            tool_calls=tool_calls,
+            tool_outputs=[
+                observation.result for observation in recorder.observations
+            ],
+            retrieved_contexts=[
+                context
+                for observation in recorder.observations
+                for context in observation.contexts
+            ],
+        )
 
     def _build_agent(
         self, conversation_id: str, recorder: ToolCallRecorder

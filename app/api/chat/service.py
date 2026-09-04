@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from app.dependencies import (
     get_chroma_client,
+    get_composer_llm,
     get_embedding_model,
     get_llm,
     get_supabase_client,
@@ -22,6 +23,7 @@ from app.repositories.sales import SalesRepository
 from app.repositories.sizing import SizingRepository
 from app.services.catalog import CatalogService
 from app.services.chatbot import ChatbotService
+from app.services.composer import AnswerComposer
 from app.services.inventory import InventoryService
 from app.services.memory import ConversationMemory
 from app.services.order import OrderService
@@ -38,7 +40,7 @@ def build_chatbot_service() -> ChatbotService:
         ChatbotService siap pakai.
 
     Raises:
-        ValueError: Kalau kredensial Anthropic atau Supabase belum diset.
+        ValueError: Kalau kredensial Supabase belum diset.
     """
     supabase = get_supabase_client()
     chroma = get_chroma_client()
@@ -52,6 +54,7 @@ def build_chatbot_service() -> ChatbotService:
 
     return ChatbotService(
         llm=get_llm(),
+        composer=AnswerComposer(llm=get_composer_llm()),
         faq_retriever=FAQRetriever(chroma_client=chroma, embed_model=embed_model),
         catalog_service=CatalogService(catalog_repository, sales_repository),
         inventory_service=InventoryService(inventory_repository, sizing_repository),

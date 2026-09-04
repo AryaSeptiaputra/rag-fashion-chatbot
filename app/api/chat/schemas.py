@@ -48,5 +48,7 @@ class HealthResponse(BaseModel):
 
     status: str
     llm_model: str
+    llm_ready: bool
+    llm_detail: str
     faq_chunks: int
     supabase_connected: bool
