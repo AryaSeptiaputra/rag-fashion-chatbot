@@ -9,14 +9,14 @@ dengan jawaban yang selalu bersumber dari data, bukan karangan model.
 Skema database di project ini berskala e-commerce nyata: **28 tabel**. Itu
 menghadirkan masalah yang tidak muncul di skema kecil:
 
-> Permukaan skema terlalu lebar untuk LLM. Model kecil seperti Haiku 4.5 yang
+> Permukaan skema terlalu lebar untuk LLM. Model kecil seperti Qwen3-1.7B yang
 > dihadapkan pada puluhan tabel mentah akan salah pilih join, mengarang nama
 > kolom, dan salah memilih tool.
 
 Solusinya berlapis — **LLM tidak pernah menyentuh tabel mentah:**
 
 ```
-28 tabel  ──►  4 view + 4 RPC Postgres  ──►  8 tool berdeskripsi tegas  ──►  Claude Haiku 4.5
+28 tabel  ──►  4 view + 4 RPC Postgres  ──►  8 tool berdeskripsi tegas  ──►  Qwen3-1.7B
    raw            peredam kompleksitas         permukaan yang dilihat LLM
 ```
 
@@ -25,15 +25,22 @@ FAQ dari PDF masuk ke vector store; stok dan pesanan selalu di-query live.
 Chatbot yang menyebut stok basi lebih merugikan daripada chatbot yang bilang
 tidak tahu.
 
+Aturan ketiga khusus varian ini: **model kecil tidak memilih tool dan menulis
+jawaban dalam satu tarikan napas.** Model 1.7B yang mengerjakan keduanya
+sekaligus cenderung melengkapi kalimatnya dengan harga dan stok yang tidak
+pernah dikembalikan tool. Karena itu jawaban akhir disusun tahap kedua yang
+hanya melihat hasil tool, bukan pertanyaan aslinya saja.
+
 ## Tech stack
 
 | Komponen | Pilihan | Alasan |
 |---|---|---|
 | Framework chatbot | LlamaIndex (`FunctionAgent`) | Agentic tool-calling, bukan router |
-| LLM | Claude **Haiku 4.5** (`claude-haiku-4-5`) | Murah & cepat untuk alur CS bervolume tinggi |
+| LLM agent | **Qwen3-1.7B** via Ollama (`qwen3:1.7b`) | Nol biaya API, jalan penuh di lokal, muat di VRAM 4 GB |
+| LLM composer | **Qwen3-1.7B** via Ollama, temperature 0.1 | Menyusun jawaban akhir hanya dari hasil tool |
 | Database | Supabase (Postgres) | Katalog, inventori, penjualan, riwayat chat |
 | Vector DB | ChromaDB (persisten lokal) | Index FAQ dari PDF |
-| Embedding | `intfloat/multilingual-e5-base` (HuggingFace lokal) | Claude API tidak menyediakan embedding; model ini kuat di Bahasa Indonesia dan gratis |
+| Embedding | `intfloat/multilingual-e5-base` (HuggingFace lokal) | Kuat di Bahasa Indonesia, jalan di CPU, dan tidak menuntut VRAM yang sedang dipakai LLM |
 | API | FastAPI | `POST /api/v1/chat`, `GET /api/v1/health` |
 | Demo UI | Streamlit | Peragaan ke klien |
 
@@ -41,10 +48,16 @@ tidak tahu.
 
 ```
                   ┌──────────────┐        ┌─────────────────┐
-   Pembeli ──────►│  FastAPI     │───────►│ ChatbotService  │
-                  │  /api/v1/chat│        │ (FunctionAgent) │
-                  └──────────────┘        └────────┬────────┘
-                                                   │ 8 tool
+   Pembeli ──────►│  FastAPI     │───────►│ Tahap 1: agent  │
+        ▲         │  /api/v1/chat│        │ (FunctionAgent) │
+        │         └──────────────┘        └────────┬────────┘
+        │                                          │ 8 tool
+        │  ┌──────────────────────────┐            │
+        └──┤ Tahap 2: AnswerComposer  │◄───────────┤
+  jawaban  │ Qwen3-1.7B, temp 0.1     │  hasil     │
+           │ jawaban HANYA dari bukti │  tool utuh │
+           └──────────────────────────┘            │
+                                                   │
                     ┌──────────────────────────────┼──────────────────────────┐
                     ▼                              ▼                          ▼
             ┌───────────────┐            ┌──────────────────┐        ┌────────────────┐
@@ -97,16 +110,18 @@ dan tidak memuat email maupun alamat.
 app/
 ├── config.py            # Pydantic Settings dari .env
 ├── dependencies.py      # factory ber-@lru_cache: LLM, embedder, chroma, supabase
-├── prompts/system.py    # system prompt + guardrail
+├── prompts/             # system.py (pemilihan tool) + composer.py (jawaban akhir)
 ├── repositories/        # 1 kelas = 1 view/RPC, tanpa logika bisnis
-├── services/            # logika bisnis + formatting ke string untuk LLM
+├── services/            # logika bisnis + composer.py (penyusun jawaban akhir)
 ├── tools/registry.py    # 8 FunctionTool + perekam audit
 ├── models/              # schema Pydantic
+├── evals/               # penilai mutu: judge · answer (RAGAS) · retrieval (DeepEval)
 ├── api/chat/            # routes.py · schemas.py · service.py
-└── utils/               # logger, resolusi error pihak ketiga
+└── utils/               # logger, resolusi error pihak ketiga, pembersih <think>
 supabase/migrations/     # 001–008, skema 28 tabel + view + RPC + index + RLS
 scripts/                 # smoke_llm · ingest_faq · seed_database · run_eval
-evals/                   # dataset.jsonl (40 kasus) + panduan
+evals/                   # dataset.jsonl (41 kasus) + retrieval.jsonl (16) + panduan
+notebooks/               # 00_eval_quality_colab.ipynb — eval mutu di Colab T4
 tests/                   # unit test repository & service, integration test route
 ui/streamlit_app.py      # demo UI
 ```
@@ -127,9 +142,20 @@ Yang wajib diisi di `.env`:
 
 | Variabel | Keterangan |
 |---|---|
-| `ANTHROPIC_API_KEY` | API key Claude |
 | `SUPABASE_URL` | URL project Supabase |
 | `SUPABASE_SERVICE_KEY` | Service-role key (backend saja, **jangan** dikirim ke frontend) |
+
+Tidak ada API key LLM di varian ini. Yang dibutuhkan sebagai gantinya adalah
+server [Ollama](https://ollama.com) yang jalan di mesin yang sama:
+
+```bash
+ollama pull qwen3:1.7b
+ollama list                # pastikan qwen3:1.7b muncul
+```
+
+Bobot Q4 model ini ~1,4 GB dan muat di GPU 4 GB. Setelan lain (`LLM_CONTEXT_WINDOW`,
+`LLM_KEEP_ALIVE`, `LLM_THINKING`, dan seluruh `COMPOSER_*`) sudah punya default yang
+masuk akal di `.env.example` — alasan tiap angka ditulis sebagai komentar di berkas itu.
 
 ### 2. Verifikasi koneksi LLM
 
@@ -137,27 +163,22 @@ Yang wajib diisi di `.env`:
 python scripts/smoke_llm.py
 ```
 
-Satu panggilan pendek ke `claude-haiku-4-5`. Jalankan ini lebih dulu sebagai
-gerbang: kalau gagal, tidak ada gunanya melanjutkan ke seeding dan ingestion.
+Gerbang tiga lapis, dari yang paling murah ke paling mahal:
 
-**Catatan kompatibilitas SDK.** `anthropic` 1.x menghapus `temperature`, `top_p`,
-dan `top_k` dari signature `Messages.create()`. Wrapper `llama-index-llms-anthropic`
-0.12.0 tetap mengirim `temperature` untuk model di luar daftar internalnya —
-daftar itu hanya memuat model yang **API**-nya menolak parameter tersebut
-(Opus 4.7/4.8/5, Fable 5, Sonnet 5), bukan model yang **SDK**-nya tidak lagi
-mengekspos parameter itu. Akibatnya Haiku 4.5 gagal dengan:
+1. Server Ollama hidup dan `qwen3:1.7b` benar-benar ter-pull.
+2. Model menjawab satu prompt pendek, dan jawabannya **tidak** memuat blok `<think>`.
+3. Model benar-benar memancarkan tool call untuk satu tool dummy.
 
-```
-TypeError: Messages.create() got an unexpected keyword argument 'temperature'
-```
+Lapis ketiga yang paling penting. Tool calling adalah kemampuan paling rapuh pada
+model 1.7B, dan seluruh arsitektur ini bergantung padanya — jauh lebih murah
+ketahuan di sini daripada di tengah eval 41 kasus.
 
-`app/utils/anthropic_compat.py` menyelesaikannya dengan memindahkan parameter
-sampling ke `extra_body`, yang diteruskan SDK apa adanya ke body request —
-Haiku 4.5 masih menerima `temperature` di level API, jadi nilai 0.2 tetap berlaku
-dan jawaban tetap konsisten. Shim ini menetralkan diri sendiri: begitu
-`llama-index` berhenti mengirim `temperature`, perilakunya sama persis dengan
-wrapper aslinya. `tests/test_anthropic_compat.py` menjaga keduanya dan akan gagal
-kalau salah satu asumsi itu berubah.
+**Catatan thinking mode.** Qwen3 adalah model hybrid: default-nya memancarkan blok
+penalaran sebelum menjawab. Blok itu memperlambat tiap giliran dan bisa bocor ke
+pembeli, jadi dimatikan lewat `LLM_THINKING=false` (diteruskan sebagai `think=false`
+ke Ollama). Lapis kedua dipasang di kode: `app/utils/text.py` membuang blok `<think>`
+dari keluaran agent maupun composer, apa pun kondisinya. Teks yang langsung dibaca
+pembeli terlalu berisiko untuk hanya diandalkan pada satu setelan.
 
 ### 3. Skema database
 
@@ -219,36 +240,93 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 ## Pengujian
 
+Pengukuran project ini berlapis tiga, dari yang paling murah ke paling mahal:
+
+| Lapis | Perkakas | Butuh juri LLM? | Menjawab pertanyaan |
+|---|---|---|---|
+| Akurasi pemilihan tool | `scripts/run_eval.py` | Tidak | Agent memilih sumber data yang benar? |
+| Mutu jawaban akhir | RAGAS | Ya | Jawaban bersandar pada bukti, dan menjawab yang ditanya? |
+| Mutu retrieval | DeepEval | Ya, kecuali `section_hit_rate` | Potongan yang tepat terambil, dan berperingkat benar? |
+
+Lapis pertama membaca jejak tool call, jadi deterministik dan gratis. Dua lapis
+berikutnya menjawab hal yang tidak terjangkau jejak: `must_not_contain` hanya
+menangkap frasa yang sudah diantisipasi penulis dataset, dan tidak ada satu pun
+metrik lama yang tahu apakah `search_faq` mengambil potongan yang benar. Tanpa
+lapis ketiga, jawaban bisa "grounded" terhadap bukti yang keliru dan tetap
+dinyatakan lulus.
+
 ```bash
 pytest                          # unit + integration test, tanpa jaringan
-python scripts/run_eval.py      # eval end-to-end terhadap Claude sungguhan
+python scripts/run_eval.py      # eval end-to-end terhadap model lokal sungguhan
 ```
 
 `pytest` memakai client Supabase palsu, jadi cepat dan gratis. Termasuk di dalamnya
 `tests/test_migrations.py`, yang memvalidasi sintaks seluruh migrasi SQL dengan parser
 Postgres asli (libpg_query) dan memastikan kolom yang dikembalikan view/RPC tetap
 cocok dengan model Pydantic yang memvalidasinya di runtime.
-`run_eval.py` benar-benar memanggil API Claude (ada biaya) dan melaporkan:
+`run_eval.py` benar-benar menjalankan model lokal — dua panggilan per kasus
+(agent + composer), jadi run penuh 41 kasus memakan waktu puluhan menit di GPU
+laptop. Yang dilaporkan:
 
 - **akurasi pemilihan tool** — target ≥ 90%
 - **groundedness** — target 100% pada klaim stok/harga
-- **rata-rata tool call per pertanyaan** — proksi efisiensi biaya
+- **rata-rata tool call per pertanyaan** — proksi latensi per giliran
 
 Penilaian dibaca dari jejak tool call yang benar-benar terjadi
 (tabel `message_tool_calls`), bukan dari menebak isi teks jawaban.
 Detail: [`evals/README.md`](evals/README.md).
 
-### Hasil terukur (41 kasus, Claude Haiku 4.5)
+### Mutu jawaban dan retrieval (RAGAS + DeepEval)
 
-| Metrik | Hasil | Target |
-|---|---|---|
-| Akurasi pemilihan tool | **97,6%** | ≥ 90% |
-| Groundedness | **100%** | 100% |
-| Rata-rata tool call / pertanyaan | 0,95 | — |
+Run `run_eval.py` juga menulis `outputs/eval_trace.jsonl`: pertanyaan, jawaban,
+bukti, dan potongan yang terambil untuk tiap kasus. Berkas itu yang dinilai
+lapis dua dan tiga.
 
-Angka awalnya 87,8%. Dua perbaikan menaikkannya, dan keduanya berada di
-**deskripsi tool**, bukan di system prompt — deskripsi tool ada persis di titik
-keputusan model, jadi jauh lebih berpengaruh:
+Dua jenis konteks dicatat terpisah, dan pemisahan itu menentukan benar-tidaknya
+angkanya. RAGAS menilai jawaban terhadap **keluaran seluruh tool** — itulah bukti
+yang dilihat `AnswerComposer`. DeepEval menilai retrieval terhadap **potongan FAQ
+saja**. Kalau keduanya disatukan, jawaban stok akan dituduh berhalusinasi karena
+angkanya tidak ada di potongan FAQ, padahal datanya sah dan datang dari Postgres.
+
+Jalankan lewat [`notebooks/00_eval_quality_colab.ipynb`](notebooks/00_eval_quality_colab.ipynb)
+pada runtime Colab T4. Notebook memasang Ollama, menarik model, membangun index
+FAQ, menjalankan kedua dataset, lalu menilai — hasilnya `outputs/quality_report.json`.
+
+Model juri `qwen2.5:7b-instruct`, terpisah dari `qwen3:1.7b` yang diuji. Model
+yang menilai jawabannya sendiri bukan pengukuran. Dependency penilai berat
+(langchain, datasets, grpcio, opentelemetry), jadi dipasang di venv terpisah
+lewat `requirements-eval.txt`, bukan di venv utama.
+
+**Tiga hal yang harus ikut terbaca bersama angkanya:**
+
+- Jurinya model 7B lokal. Angkanya sah untuk membandingkan antar-run dengan juri
+  yang sama, **tidak** sebanding dengan skor RAGAS di internet yang hampir selalu
+  memakai juri kelas GPT-4.
+- Korpus FAQ baru 9 potongan dari satu dokumen contoh. Metrik retrieval di atas
+  16 pertanyaan membuktikan pipeline-nya bekerja, bukan bahwa retrieval-nya bagus.
+- Gagal-nilai bukan skor nol. `unscored_total` dilaporkan terpisah dan tidak ikut
+  rata-rata; kalau angkanya besar, yang bermasalah jurinya, bukan sistem yang diuji.
+
+### Hasil terukur (41 kasus yang sama, dua penyedia LLM)
+
+| Metrik | Claude Haiku 4.5 (API) | Qwen3-1.7B (lokal) | Target |
+|---|---|---|---|
+| Akurasi pemilihan tool | **97,6%** | _belum diukur_ | ≥ 90% |
+| Groundedness | **100%** | _belum diukur_ | 100% |
+| Rata-rata tool call / pertanyaan | 0,95 | _belum diukur_ | — |
+
+> Kolom Qwen diisi dari `outputs/eval_report_qwen.json` setelah run penuh
+> dijalankan. Angka Claude direproduksi dari branch `chatbot-claude-api`.
+> Tidak ada angka yang ditulis di sini tanpa pengukuran.
+
+Nilai perbandingan ini bukan pada siapa yang menang. Dataset, tool, prompt
+guardrail, dan cara skoringnya identik, jadi selisihnya mengukur satu hal saja:
+berapa banyak akurasi pemilihan tool yang dilepas ketika biaya per token
+dihilangkan dan seluruh data pembeli berhenti meninggalkan mesin.
+
+Pada varian API, angka awalnya 87,8%. Dua perbaikan menaikkannya ke 97,6%, dan
+keduanya berada di **deskripsi tool**, bukan di system prompt — deskripsi tool
+ada persis di titik keputusan model, jadi jauh lebih berpengaruh:
 
 1. `escalate_to_human` semula berbunyi "jangan pakai sebagai jalan pintas".
    Kalimat itu justru membuat model mengumpulkan detail lebih dulu dan tidak
@@ -256,6 +334,9 @@ keputusan model, jadi jauh lebih berpengaruh:
    dan mengisi `reason` dengan kalimat pembeli apa adanya.
 2. `search_products` tidak menyebutkan bahwa `keyword` boleh dikosongkan, jadi
    pertanyaan luas seperti "produk apa aja yang ready?" dibalas pertanyaan balik.
+
+Kedua perbaikan itu ikut terbawa ke branch ini tanpa perubahan — itu justru yang
+membuat perbandingannya adil.
 
 ### Jaring pengaman eskalasi
 
@@ -271,48 +352,87 @@ tawaran ("mau saya teruskan ke admin?") sengaja tidak ikut terdeteksi.
 Baris otomatis itu **tidak** ditambahkan ke `tool_calls`, supaya eval tetap
 melaporkan kegagalan model apa adanya alih-alih menutupinya oleh jaring pengaman.
 
-## Catatan konfigurasi Claude
+## Catatan konfigurasi model lokal
 
-`claude-haiku-4-5`, `max_tokens=2048` — balasan CS memang pendek, ini pengecualian
-sadar dari default yang lebih besar. Parameter `thinking` dan `output_config.effort`
-sengaja **tidak** dipakai: Haiku 4.5 menolak `effort`, dan thinking di Haiku memakai
-`budget_tokens` gaya lama yang tidak diperlukan untuk alur berlatensi rendah ini.
+| Setelan | Nilai | Alasan |
+|---|---|---|
+| `LLM_CONTEXT_WINDOW` | 8192 | `num_ctx` default Ollama terlalu kecil untuk system prompt + skema 8 tool + riwayat + hasil tool. Qwen3-1.7B native 32k; 8k cukup dan aman di VRAM 4 GB |
+| `LLM_KEEP_ALIVE` | `10m` | Tanpa ini bobot di-unload antar request dan tiap giliran bayar cold start — fatal saat eval 41 kasus |
+| `LLM_MAX_TOKENS` | 1024 | Tahap agent hanya perlu memancarkan tool call, bukan prosa |
+| `COMPOSER_TEMPERATURE` | 0.1 | Tahap yang menyentuh angka harga dan stok tidak boleh kreatif |
+| `AGENT_MAX_ITERATIONS` | 5 | Model 1.7B yang bingung cenderung memanggil tool berulang-ulang; batas ini yang membatasi latensi terburuk |
+
+`num_ctx` yang jebol tidak melempar error: Ollama diam-diam memotong prompt dari
+kiri, yang justru membuang system prompt beserta seluruh aturan groundedness-nya.
+Karena itu blok bukti yang dikirim ke composer dibatasi di sisi aplikasi
+(`app/services/composer.py`), bukan diserahkan ke pemotongan otomatis.
 
 ## Batasan yang diketahui
 
-- **Prompt caching belum diaktifkan.** System prompt dan definisi 8 tool stabil, jadi
-  kandidat kuat untuk `cache_control` ephemeral. Belum dipasang karena perlu verifikasi
-  bagaimana wrapper LlamaIndex meneruskan parameter tersebut.
-- **8 tool masih dalam batas nyaman Haiku 4.5.** Kalau eval menunjukkan kebingungan
-  pemilihan tool setelah tool bertambah, langkah berikutnya adalah
-  `tool_search_tool_bm25_20251119` dengan `defer_loading`.
+- **Butuh GPU untuk latensi yang wajar.** Diukur di RTX 3050 Laptop 4 GB. Di CPU
+  murni model ini hanya beberapa token/detik, jadi varian ini tidak bisa di-deploy
+  ke tier gratis mana pun yang tanpa GPU — lihat [Varian implementasi](#varian-implementasi).
+- **8 tool berada di batas atas kemampuan model 1.7B.** Ini titik paling rapuh
+  arsitektur ini dan yang paling patut diperhatikan sebelum menambah tool.
 - **`escalate_to_human` hanya mencatat ke database.** Notifikasi nyata (email/WhatsApp
   ke admin) belum diimplementasikan.
-- **Kepatuhan eskalasi model belum 100%.** Diukur 97,6% akurasi tool; sisanya
-  ditangani jaring pengaman di kode, bukan diklaim beres. Kalau kepatuhan ini
-  jadi kritis, langkah berikutnya adalah menaikkan model untuk rute eskalasi saja.
+- **Kepatuhan eskalasi model belum 100%.** Sisanya ditangani jaring pengaman di
+  kode, bukan diklaim beres. Pada model 1.7B jaring pengaman ini justru lebih
+  sering terpakai daripada di varian API.
 - **Streaming belum ada.** Endpoint mengembalikan jawaban utuh; untuk UX chat yang
   lebih responsif, SSE bisa ditambahkan.
-- **Shim `anthropic_compat` bersifat sementara.** Ia menimpa property privat
-  (`_model_kwargs`) milik wrapper LlamaIndex. Begitu ada rilis
-  `llama-index-llms-anthropic` yang sadar SDK 1.x, hapus shim dan kembalikan
-  `dependencies.get_llm()` ke `Anthropic` biasa — `tests/test_anthropic_compat.py`
-  akan memberi tahu saat momen itu tiba.
+- **Composer menambah satu panggilan LLM per giliran.** Itu harga yang dibayar
+  untuk groundedness. Kalau latensi jadi masalah, composer bisa dibuat bersyarat
+  (hanya jalan saat ada tool call), tapi jalur jawaban jadi bercabang dua.
+- **Kualitas bahasa Indonesia Qwen3-1.7B di bawah model besar.** Jawaban benar
+  secara fakta belum tentu terdengar luwes. Yang dijaga di sini groundedness-nya,
+  bukan gaya bahasanya.
 
 ## Varian implementasi
 
-Branch ini memakai **Claude (Claude API)** sebagai penyedia LLM. Varian dengan
-model lokal (mis. Qwen) direncanakan di branch terpisah. Titik sentuh yang
-berbeda antar-varian hanya dua:
+Repo ini punya dua branch yang menjalankan produk yang sama di atas skema, tool,
+prompt guardrail, dataset eval, dan test yang identik — yang berbeda hanya
+penyedia LLM-nya.
 
-| Berkas | Yang perlu diganti |
+| Branch | LLM | Biaya | Bisa di-deploy gratis? |
+|---|---|---|---|
+| `chatbot-claude-api` | Claude Haiku 4.5 lewat Claude API | Per token | Ya — inferensi di sisi penyedia, host cukup CPU kecil |
+| `chatbot-local-llm` (branch ini) | Qwen3-1.7B lewat Ollama, dua tahap | Nol biaya API | Tidak — butuh GPU, dijalankan lokal |
+
+Perbedaan biaya dan deployability itu bukan detail teknis; itu inti trade-off
+yang dibandingkan project ini. Varian lokal menghilangkan biaya per token dan
+membuat seluruh data pembeli tidak pernah meninggalkan mesin, dengan bayaran
+akurasi pemilihan tool yang lebih rendah dan kebutuhan GPU.
+
+### Titik sentuh antar-varian
+
+README lama mengklaim hanya dua berkas yang berbeda. Klaim itu meleset. Daftar
+sebenarnya:
+
+| Berkas | Perbedaan |
 |---|---|
-| `app/dependencies.py` -> `get_llm()` | Kembalikan wrapper LLM lain, mis. `Ollama` atau `HuggingFaceLLM` |
-| `app/config.py` | `llm_model`, `llm_max_tokens`, dan kredensial penyedia |
+| `app/dependencies.py` | `get_llm()` + `get_composer_llm()` mengembalikan `Ollama`, plus `probe_llm_ready()` |
+| `app/config.py`, `.env.example` | Setelan Ollama menggantikan kredensial API |
+| `app/services/composer.py`, `app/prompts/composer.py` | Tahap kedua; tidak ada di varian API |
+| `app/services/chatbot.py` | Memanggil composer, anotasi LLM jadi netral penyedia |
+| `app/tools/registry.py`, `app/models/chat.py` | `ToolObservation`: hasil tool utuh untuk composer |
+| `app/utils/errors.py`, `app/api/chat/routes.py` | Taksonomi error Ollama menggantikan error `anthropic` |
+| `app/utils/text.py` | Pembersih blok `<think>`; tidak diperlukan varian API |
+| `app/evals/` | Penilai RAGAS + DeepEval dengan juri lokal; belum ada di varian API |
+| `scripts/smoke_llm.py` | Gerbang tiga lapis termasuk probe tool calling |
+| `requirements.txt`, `requirements-eval.txt` | `llama-index-llms-ollama` + `ollama` menggantikan `anthropic`; dependency penilai di venv terpisah |
 
-Sisanya tidak berubah: skema database, 8 tool, guardrail prompt, eval harness,
-dan seluruh test tidak terikat pada penyedia LLM tertentu. `app/utils/anthropic_compat.py`
-khusus Claude dan tidak diperlukan pada varian lokal.
+Yang **tidak** berubah: 28 tabel dan seluruh migrasi, 4 view + 4 RPC, delapan
+tool beserta deskripsinya, jaring pengaman eskalasi, dataset eval 41 kasus, dan
+cara skoringnya. Lapis penilaian RAGAS dan DeepEval memakai trace yang formatnya
+netral penyedia, jadi varian API bisa memakainya tanpa perubahan begitu jurinya
+disambungkan.
+
+### Pindah branch
+
+`.env` tidak ikut di-commit, jadi ia tidak berpindah bersama branch. Kredensial
+varian API disimpan di `.env.claude-api` (ikut di-gitignore) saat branch ini
+dibuat; salin kembali ke `.env` sebelum menjalankan `chatbot-claude-api`.
 
 ## Kontributor
 
