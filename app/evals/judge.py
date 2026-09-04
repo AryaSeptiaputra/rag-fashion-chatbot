@@ -1,14 +1,18 @@
-"""Perakitan model juri lokal untuk RAGAS dan DeepEval.
+"""Perakitan model juri untuk RAGAS dan DeepEval.
 
-Keduanya dijalankan lewat Ollama. RAGAS 0.4 menuntut client yang sudah jadi
-dan tidak lagi menyediakan wrapper LangChain maupun LlamaIndex, jadi jalurnya
-adalah client `openai` yang diarahkan ke endpoint kompatibel milik Ollama.
-Paket openai di sini murni transport HTTP; tidak ada akun maupun kunci OpenAI
-yang terlibat.
+Juri memakai Claude API, terpisah dari Qwen3-1.7B yang diuji. Pemisahan itu
+disengaja dan merupakan satu-satunya titik di branch ini yang menyentuh layanan
+berbayar: juri adalah alat ukur, bukan bagian produk. Chatbot-nya tetap berjalan
+penuh di lokal tanpa kunci API mana pun.
 
-Import ragas dan deepeval sengaja ditahan di dalam fungsi, bukan di tingkat
-modul: berkas ini melayani dua pustaka sekaligus, dan import di atas akan
-membuat perakitan juri RAGAS gagal hanya karena DeepEval belum terpasang.
+Embedding tetap lokal lewat Ollama karena Anthropic tidak menyediakan API
+embedding, dan metrik yang memakainya hanya mengukur kemiripan vektor -- bukan
+memberi penilaian yang mutunya bergantung pada kekuatan model.
+
+Import ragas, deepeval, dan anthropic sengaja ditahan di dalam fungsi, bukan di
+tingkat modul: berkas ini melayani beberapa pustaka sekaligus, dan import di
+atas akan membuat perakitan juri RAGAS gagal hanya karena DeepEval belum
+terpasang.
 """
 
 from typing import Any
@@ -20,38 +24,63 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Endpoint kompatibel Ollama tetap memeriksa keberadaan header Authorization,
-# tapi tidak memvalidasi isinya.
+# Endpoint kompatibel Ollama memeriksa keberadaan header Authorization, tapi
+# tidak memvalidasi isinya.
 _PLACEHOLDER_KEY = "ollama"
 
 
-def build_openai_compatible_client() -> OpenAI:
+def build_anthropic_client() -> Any:
+    """Bangun client Claude untuk juri.
+
+    Returns:
+        Client anthropic yang sudah membawa kunci API.
+
+    Raises:
+        ValueError: Kalau ANTHROPIC_API_KEY belum diset.
+    """
+    from anthropic import Anthropic
+
+    return Anthropic(api_key=settings.require_judge_key())
+
+
+def build_embedding_client() -> OpenAI:
     """Bangun client HTTP ke endpoint kompatibel OpenAI milik Ollama.
+
+    Dipakai hanya untuk embedding juri. Paket openai di sini murni transport;
+    tidak ada akun maupun kunci OpenAI yang terlibat.
 
     Returns:
         Client yang menunjuk server Ollama lokal.
     """
     base_url = f"{settings.ollama_base_url.rstrip('/')}/v1"
-    logger.info(f"Client juri diarahkan ke {base_url}")
+    logger.info(f"Client embedding juri diarahkan ke {base_url}")
     return OpenAI(api_key=_PLACEHOLDER_KEY, base_url=base_url)
 
 
-def build_ragas_judge(client: OpenAI | None = None) -> Any:
+def build_ragas_judge(client: Any | None = None) -> Any:
     """Bangun LLM juri untuk RAGAS.
 
+    RAGAS meneruskan provider "anthropic" ke instructor.from_anthropic, jadi
+    yang diharapkan adalah instance SDK anthropic apa adanya.
+
+    temperature diset eksplisit karena default RAGAS 0.01, bukan 0. Selisihnya
+    kecil, tapi alat ukur yang memberi skor berbeda pada masukan yang sama
+    membuat perbandingan antar-run kehilangan arti.
+
     Args:
-        client: Client kompatibel OpenAI; dibuat sendiri kalau tidak diberikan.
+        client: Client anthropic; dibuat sendiri kalau tidak diberikan.
 
     Returns:
-        Objek LLM RAGAS siap dioper ke evaluate().
+        Objek LLM RAGAS siap dipakai metrik.
     """
     from ragas.llms import llm_factory
 
-    logger.info(f"Juri RAGAS: {settings.judge_model}")
+    logger.info(f"Juri RAGAS: {settings.judge_model} (Claude API)")
     return llm_factory(
         settings.judge_model,
-        provider="openai",
-        client=client or build_openai_compatible_client(),
+        provider="anthropic",
+        client=client or build_anthropic_client(),
+        temperature=settings.judge_temperature,
     )
 
 
@@ -69,7 +98,7 @@ def build_ragas_embeddings(client: OpenAI | None = None) -> Any | None:
     Returns:
         Objek embedding RAGAS, atau None kalau tidak bisa dirakit.
     """
-    resolved = client or build_openai_compatible_client()
+    resolved = client or build_embedding_client()
 
     try:
         from ragas.embeddings import OpenAIEmbeddings
@@ -82,7 +111,7 @@ def build_ragas_embeddings(client: OpenAI | None = None) -> Any | None:
         embeddings = _embeddings_via_factory(resolved)
 
     if embeddings is not None:
-        logger.info(f"Embedding juri: {settings.judge_embedding_model}")
+        logger.info(f"Embedding juri: {settings.judge_embedding_model} (Ollama lokal)")
     return embeddings
 
 
@@ -106,13 +135,16 @@ def build_deepeval_judge() -> Any:
     """Bangun model juri untuk DeepEval.
 
     Returns:
-        OllamaModel yang bisa dioper ke metrik DeepEval mana pun.
-    """
-    from deepeval.models import OllamaModel
+        AnthropicModel yang bisa dioper ke metrik DeepEval mana pun.
 
-    logger.info(f"Juri DeepEval: {settings.judge_model}")
-    return OllamaModel(
+    Raises:
+        ValueError: Kalau ANTHROPIC_API_KEY belum diset.
+    """
+    from deepeval.models import AnthropicModel
+
+    logger.info(f"Juri DeepEval: {settings.judge_model} (Claude API)")
+    return AnthropicModel(
         model=settings.judge_model,
-        base_url=settings.ollama_base_url,
+        api_key=settings.require_judge_key(),
         temperature=settings.judge_temperature,
     )

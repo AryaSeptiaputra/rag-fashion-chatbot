@@ -5,8 +5,8 @@ Tiga lapis pengukuran, dari yang paling murah ke paling mahal:
 | Lapis | Dijalankan oleh | Butuh juri LLM? | Yang diukur |
 |---|---|---|---|
 | Akurasi pemilihan tool | `scripts/run_eval.py` | Tidak | Agent memilih sumber data yang benar |
-| Mutu jawaban akhir | RAGAS, lewat notebook | Ya | Jawaban bersandar pada bukti dan menjawab yang ditanya |
-| Mutu retrieval | DeepEval, lewat notebook | Ya (kecuali `section_hit_rate`) | Potongan yang tepat terambil, dan berperingkat benar |
+| Mutu jawaban akhir | RAGAS, lewat notebook | Ya, Claude API | Jawaban bersandar pada bukti dan menjawab yang ditanya |
+| Mutu retrieval | DeepEval, lewat notebook | Ya, Claude API (kecuali `section_hit_rate`) | Potongan yang tepat terambil, dan berperingkat benar |
 
 Lapis pertama menguji klaim inti project: **agent dengan 8 tool di atas 28 tabel tetap
 memilih sumber data yang benar, dan tidak mengarang saat data tidak ada.** Dua lapis
@@ -110,8 +110,16 @@ lagi mengacu pada jawaban yang sama.
 T4: memasang Ollama, menarik model, membangun index FAQ, menjalankan kedua dataset,
 lalu menilai dengan RAGAS dan DeepEval. Hasil akhirnya `outputs/quality_report.json`.
 
-Model juri `qwen2.5:7b-instruct`, terpisah dari `qwen3:1.7b` yang diuji. Model yang
-menilai jawabannya sendiri bukan pengukuran.
+Model juri `claude-haiku-4-5` lewat Claude API, terpisah dari `qwen3:1.7b` yang diuji.
+Model yang menilai jawabannya sendiri bukan pengukuran, dan juri kecil menilai terlalu
+berisik untuk dipercaya.
+
+Juri adalah satu-satunya bagian project ini yang memakai API berbayar. Chatbot yang
+diukur tetap berjalan penuh di lokal tanpa kunci API — justru itu klaim yang sedang
+diuji. `ANTHROPIC_API_KEY` hanya dibutuhkan saat menjalankan lapis 2 dan 3.
+
+Embedding juri tetap lokal (`nomic-embed-text` lewat Ollama): Anthropic tidak
+menyediakan API embedding, dan metrik yang memakainya hanya mengukur kemiripan vektor.
 
 Untuk menjalankannya lokal, dependency penilai ada di venv terpisah:
 
@@ -122,18 +130,26 @@ python -m venv .venv-eval
 
 ## Membaca angka lapis 2 dan 3
 
-**Jurinya model 7B lokal.** Angkanya sah untuk membandingkan antar-run dengan juri yang
-sama — sebelum dan sesudah mengubah prompt, chunking, atau `RETRIEVAL_TOP_K`. Angka ini
-**tidak** sebanding dengan skor RAGAS yang dipublikasikan di internet, yang hampir
-selalu memakai juri kelas GPT-4.
+**Sebut juri dan yang diuji berpasangan.** Angkanya berarti "Qwen3-1.7B lokal, dinilai
+`claude-haiku-4-5`". Mengganti salah satunya membuat angka tidak lagi sebanding dengan
+run sebelumnya, jadi `judge_model` ikut tersimpan di laporan.
+
+**Juri kuat memindahkan sumber keraguan, bukan menghapusnya.** Skor rendah kini lebih
+mungkin benar-benar berasal dari sistem yang diuji. Yang tersisa: LLM-as-judge tetap
+punya bias sistematis, terutama cenderung menghukum jawaban ringkas yang sebenarnya
+benar — dan jawaban chatbot ini memang dibatasi empat kalimat.
 
 **Korpus FAQ baru 9 potongan dari satu dokumen contoh.** Metrik retrieval di atas 16
 pertanyaan membuktikan pipeline-nya bekerja, bukan bahwa retrieval-nya bagus pada
 korpus produksi.
 
 **Gagal-nilai bukan skor nol.** `unscored_total` menghitung kasus yang jurinya gagal
-mengeluarkan JSON sesuai skema; kasus itu tidak ikut rata-rata. Kalau angkanya besar,
-yang bermasalah jurinya, bukan sistem yang diuji.
+mengeluarkan JSON sesuai skema; kasus itu tidak ikut rata-rata. Angka besar di sini
+menunjuk ke masalah transport atau rate limit, bukan ke mutu chatbot.
+
+**Lapis 2 dan 3 memanggil API berbayar.** Lapis 1 tidak. Iterasi prompt sebaiknya
+memakai lapis 1 lebih dulu, dan penilaian mutu dijalankan saat ada yang benar-benar
+ingin diukur.
 
 ## Catatan
 

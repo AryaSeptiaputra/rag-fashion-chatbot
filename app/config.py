@@ -35,12 +35,20 @@ class Settings(BaseSettings):
     composer_temperature: float = 0.1
     composer_history_turns: int = 2
 
-    # Model juri untuk RAGAS dan DeepEval. Sengaja dipisah dari model yang
-    # diuji: penilai bukan bagian produk, dan memakai model yang sama untuk
-    # menjawab sekaligus menilai jawabannya sendiri bukan pengukuran.
-    judge_model: str = "qwen2.5:7b-instruct"
-    judge_embedding_model: str = "nomic-embed-text"
+    # Model juri untuk RAGAS dan DeepEval, memakai Claude API.
+    #
+    # Ini satu-satunya tempat di branch ini yang menyentuh API berbayar, dan
+    # itu disengaja: juri adalah alat ukur, bukan bagian produk. Chatbot-nya
+    # sendiri tetap berjalan penuh di lokal tanpa kunci API mana pun. Memakai
+    # model yang diuji untuk menilai jawabannya sendiri bukan pengukuran, dan
+    # juri 7B lokal menilai terlalu berisik untuk dipercaya.
+    anthropic_api_key: str = ""
+    judge_model: str = "claude-haiku-4-5"
     judge_temperature: float = 0.0
+
+    # Embedding juri tetap lokal: Anthropic tidak menyediakan API embedding,
+    # dan metrik yang memakainya hanya mengukur kemiripan, bukan menilai.
+    judge_embedding_model: str = "nomic-embed-text"
 
     supabase_url: str = ""
     supabase_service_key: str = ""
@@ -81,6 +89,26 @@ class Settings(BaseSettings):
     def ollama_tags_url(self) -> str:
         """URL endpoint daftar model yang sudah ter-pull di Ollama."""
         return f"{self.ollama_base_url.rstrip('/')}/api/tags"
+
+    def require_judge_key(self) -> str:
+        """Ambil kunci Claude untuk juri eval, gagal keras kalau belum diset.
+
+        Hanya harness eval yang memanggil ini. Aplikasi chatbot tidak pernah
+        membutuhkannya, jadi kunci yang kosong tidak boleh menghalangi apa pun
+        selain penilaian mutu.
+
+        Returns:
+            Nilai ANTHROPIC_API_KEY.
+
+        Raises:
+            ValueError: Kalau ANTHROPIC_API_KEY kosong.
+        """
+        if not self.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY wajib diisi untuk menjalankan penilaian mutu. "
+                "Chatbot-nya sendiri tidak membutuhkannya."
+            )
+        return self.anthropic_api_key
 
     def require_supabase(self) -> tuple[str, str]:
         """Ambil kredensial Supabase, gagal keras kalau belum diset.

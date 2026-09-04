@@ -245,8 +245,8 @@ Pengukuran project ini berlapis tiga, dari yang paling murah ke paling mahal:
 | Lapis | Perkakas | Butuh juri LLM? | Menjawab pertanyaan |
 |---|---|---|---|
 | Akurasi pemilihan tool | `scripts/run_eval.py` | Tidak | Agent memilih sumber data yang benar? |
-| Mutu jawaban akhir | RAGAS | Ya | Jawaban bersandar pada bukti, dan menjawab yang ditanya? |
-| Mutu retrieval | DeepEval | Ya, kecuali `section_hit_rate` | Potongan yang tepat terambil, dan berperingkat benar? |
+| Mutu jawaban akhir | RAGAS | Ya, Claude API | Jawaban bersandar pada bukti, dan menjawab yang ditanya? |
+| Mutu retrieval | DeepEval | Ya, Claude API — kecuali `section_hit_rate` | Potongan yang tepat terambil, dan berperingkat benar? |
 
 Lapis pertama membaca jejak tool call, jadi deterministik dan gratis. Dua lapis
 berikutnya menjawab hal yang tidak terjangkau jejak: `must_not_contain` hanya
@@ -292,20 +292,31 @@ Jalankan lewat [`notebooks/00_eval_quality_colab.ipynb`](notebooks/00_eval_quali
 pada runtime Colab T4. Notebook memasang Ollama, menarik model, membangun index
 FAQ, menjalankan kedua dataset, lalu menilai — hasilnya `outputs/quality_report.json`.
 
-Model juri `qwen2.5:7b-instruct`, terpisah dari `qwen3:1.7b` yang diuji. Model
-yang menilai jawabannya sendiri bukan pengukuran. Dependency penilai berat
-(langchain, datasets, grpcio, opentelemetry), jadi dipasang di venv terpisah
-lewat `requirements-eval.txt`, bukan di venv utama.
+Model juri `claude-haiku-4-5` lewat Claude API, terpisah dari `qwen3:1.7b` yang
+diuji. Model yang menilai jawabannya sendiri bukan pengukuran, dan juri kecil
+menilai terlalu berisik untuk dipercaya.
+
+**Ini satu-satunya bagian project yang memakai API berbayar, dan itu disengaja.**
+Juri adalah alat ukur, bukan bagian produk — chatbot-nya tetap berjalan penuh di
+lokal tanpa kunci API mana pun, dan justru itu klaim yang sedang diuji.
+`ANTHROPIC_API_KEY` hanya dibutuhkan saat menjalankan penilaian mutu; kosongkan
+kalau hanya menjalankan chatbot. Embedding juri tetap lokal, karena Anthropic
+tidak menyediakan API embedding dan metrik yang memakainya hanya mengukur
+kemiripan vektor.
+
+Dependency penilai berat (langchain, datasets, grpcio, opentelemetry), jadi
+dipasang di venv terpisah lewat `requirements-eval.txt`, bukan di venv utama.
 
 **Tiga hal yang harus ikut terbaca bersama angkanya:**
 
-- Jurinya model 7B lokal. Angkanya sah untuk membandingkan antar-run dengan juri
-  yang sama, **tidak** sebanding dengan skor RAGAS di internet yang hampir selalu
-  memakai juri kelas GPT-4.
+- Sebut juri dan yang diuji berpasangan. Angkanya berarti "Qwen3-1.7B lokal,
+  dinilai `claude-haiku-4-5`"; `judge_model` ikut tersimpan di laporan supaya
+  tidak tercatat terpisah dari skornya.
 - Korpus FAQ baru 9 potongan dari satu dokumen contoh. Metrik retrieval di atas
   16 pertanyaan membuktikan pipeline-nya bekerja, bukan bahwa retrieval-nya bagus.
 - Gagal-nilai bukan skor nol. `unscored_total` dilaporkan terpisah dan tidak ikut
-  rata-rata; kalau angkanya besar, yang bermasalah jurinya, bukan sistem yang diuji.
+  rata-rata; angka besar di sana menunjuk masalah transport atau rate limit,
+  bukan mutu chatbot.
 
 ### Hasil terukur (41 kasus yang sama, dua penyedia LLM)
 
@@ -418,7 +429,7 @@ sebenarnya:
 | `app/tools/registry.py`, `app/models/chat.py` | `ToolObservation`: hasil tool utuh untuk composer |
 | `app/utils/errors.py`, `app/api/chat/routes.py` | Taksonomi error Ollama menggantikan error `anthropic` |
 | `app/utils/text.py` | Pembersih blok `<think>`; tidak diperlukan varian API |
-| `app/evals/` | Penilai RAGAS + DeepEval dengan juri lokal; belum ada di varian API |
+| `app/evals/` | Penilai RAGAS + DeepEval; belum ada di varian API |
 | `scripts/smoke_llm.py` | Gerbang tiga lapis termasuk probe tool calling |
 | `requirements.txt`, `requirements-eval.txt` | `llama-index-llms-ollama` + `ollama` menggantikan `anthropic`; dependency penilai di venv terpisah |
 

@@ -48,11 +48,34 @@ def make_trace(**overrides: object) -> EvalTrace:
     return EvalTrace(**payload)  # type: ignore[arg-type]
 
 
-def test_judge_client_targets_the_local_ollama_endpoint() -> None:
-    pytest.importorskip("openai")
-    from app.evals.judge import build_openai_compatible_client
+def test_missing_judge_key_says_the_chatbot_does_not_need_it() -> None:
+    # Kunci kosong hanya boleh menghalangi penilaian mutu. Pesan yang tidak
+    # menyebutkan itu akan membuat orang mengira chatbot-nya ikut butuh API.
+    original = settings.anthropic_api_key
+    settings.anthropic_api_key = ""
+    try:
+        with pytest.raises(ValueError, match="tidak membutuhkannya"):
+            settings.require_judge_key()
+    finally:
+        settings.anthropic_api_key = original
 
-    client = build_openai_compatible_client()
+
+def test_judge_key_is_returned_when_present() -> None:
+    original = settings.anthropic_api_key
+    settings.anthropic_api_key = "sk-ant-contoh"
+    try:
+        assert settings.require_judge_key() == "sk-ant-contoh"
+    finally:
+        settings.anthropic_api_key = original
+
+
+def test_embedding_client_stays_on_the_local_ollama_endpoint() -> None:
+    # Juri pindah ke Claude, embedding tidak: Anthropic tidak menyediakan API
+    # embedding, dan metrik yang memakainya hanya mengukur kemiripan vektor.
+    pytest.importorskip("openai")
+    from app.evals.judge import build_embedding_client
+
+    client = build_embedding_client()
 
     assert str(client.base_url).rstrip("/").endswith("/v1")
     assert settings.ollama_base_url.split("//", 1)[-1] in str(client.base_url)

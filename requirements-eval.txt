@@ -19,13 +19,24 @@
 ragas==0.4.3
 deepeval==4.2.1
 
-# Transport HTTP ke endpoint kompatibel OpenAI milik Ollama -- bukan akun
-# OpenAI. RAGAS 0.4 menghapus wrapper LangChain/LlamaIndex dan menuntut client
-# yang sudah jadi, jadi paket ini dipakai langsung di app/evals/judge.py.
+# Model juri. Ini satu-satunya bagian project yang menyentuh API berbayar, dan
+# hanya harness eval yang memakainya -- chatbot-nya tetap berjalan penuh di
+# lokal tanpa kunci API.
 #
-# Ditahan di 2.x dengan sengaja: instructor, yang dipakai RAGAS untuk keluaran
-# terstruktur, menuntut openai<3.0.0. Menaikkan ke 3.x akan menggagalkan
-# resolusi.
+# Dipin ke 0.93.0 mengikuti instructor, yang dipakai RAGAS untuk keluaran
+# terstruktur dan mem-pin anthropic PERSIS di versi itu (bukan rentang).
+# Versi ini juga masih memakai httpx klasik, jadi httpx2 tidak ikut masuk dan
+# httpx==0.28.1 di requirements.txt tetap terpakai.
+anthropic==0.93.0
+# Dibutuhkan instructor.from_anthropic untuk mem-parse keluaran bermode XML.
+xmltodict==1.0.4
+
+# Transport HTTP ke endpoint kompatibel OpenAI milik Ollama -- bukan akun
+# OpenAI. Hanya dipakai untuk embedding juri, karena Anthropic tidak
+# menyediakan API embedding.
+#
+# Ditahan di 2.x dengan sengaja: instructor menuntut openai<3.0.0. Menaikkan
+# ke 3.x akan menggagalkan resolusi.
 openai==2.54.0
 
 # Grafik ringkasan di notebook. pandas tidak perlu didaftarkan; ia sudah ikut
