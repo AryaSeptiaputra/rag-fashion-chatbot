@@ -28,5 +28,9 @@ deepeval==4.2.1
 anthropic==0.93.0
 
 # Tabel ringkasan dan grafik di notebook.
-pandas==3.0.5
+#
+# pandas ditahan di 2.x: llama-index-readers-file 0.7.0 meminta pandas<3, jadi
+# pin 3.x membuat seluruh resolusi gagal dengan ResolutionImpossible -- termasuk
+# baris '-e .' di atas, sehingga package project tidak ikut terpasang.
+pandas==2.3.3
 matplotlib==3.11.1
