@@ -14,17 +14,67 @@ from typing import Any
 
 from llama_index.core.tools import FunctionTool
 
-from app.models.chat import ToolCallRecord
+from app.models.chat import Citation, Mode, Sumber, ToolCallRecord
 from app.repositories.base import RepositoryError
 from app.services.catalog import CatalogService
 from app.services.inventory import InventoryService
 from app.services.order import OrderService
-from app.services.retrieval import FAQRetriever
+from app.services.retrieval import FAQRetriever, to_citations
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 _MAX_SUMMARY_CHARS = 500
+
+# Dari mana tiap tool mengambil datanya. Dipakai UI untuk memberi badge pada
+# jawaban: satu-satunya tool yang membaca indeks dokumen adalah search_faq,
+# tujuh lainnya membaca (atau menulis) Supabase. escalate_to_human masuk
+# "database" karena ia memang menulis baris eskalasi, bukan membaca dokumen.
+_SUMBER_TOOL: dict[str, Sumber] = {
+    "search_faq": "dokumen",
+    "search_products": "database",
+    "get_product_detail": "database",
+    "check_stock": "database",
+    "recommend_size": "database",
+    "track_order": "database",
+    "check_promotion": "database",
+    "escalate_to_human": "database",
+}
+
+
+def resolve_source(tool_name: str) -> Sumber:
+    """Tentukan sumber data satu tool.
+
+    Args:
+        tool_name: Nama tool seperti yang dilihat LLM.
+
+    Returns:
+        "dokumen" atau "database"; tool tak dikenal dianggap database.
+    """
+    sumber = _SUMBER_TOOL.get(tool_name)
+    if sumber is None:
+        logger.warning(f"Tool '{tool_name}' belum punya entri sumber di _SUMBER_TOOL")
+        return "database"
+    return sumber
+
+
+def resolve_mode(tool_calls: list[ToolCallRecord]) -> Mode:
+    """Simpulkan asal jawaban satu giliran dari tool yang dipakainya.
+
+    Args:
+        tool_calls: Jejak tool pada giliran ini.
+
+    Returns:
+        Mode gabungan untuk ditampilkan sebagai badge di UI.
+    """
+    sumber = {resolve_source(call.tool_name) for call in tool_calls}
+    if not sumber:
+        return "tanpa_sumber"
+    if sumber == {"dokumen"}:
+        return "dokumen"
+    if sumber == {"database"}:
+        return "database"
+    return "campuran"
 
 
 class ToolCallRecorder:
@@ -36,6 +86,22 @@ class ToolCallRecorder:
 
     def __init__(self) -> None:
         self.records: list[ToolCallRecord] = []
+        self.citations: list[Citation] = []
+
+    def catat_sitasi(self, citations: list[Citation]) -> None:
+        """Simpan kutipan dokumen yang dipakai pada giliran ini.
+
+        Jalur terpisah dari records karena kutipan sengaja TIDAK ikut masuk ke
+        nilai kembalian tool: apa pun yang dikembalikan tool akan dibaca model
+        dan menambah token input tiap iterasi.
+
+        Args:
+            citations: Kutipan dari satu panggilan search_faq.
+        """
+        sudah_ada = {(c.file_name, c.page) for c in self.citations}
+        self.citations.extend(
+            c for c in citations if (c.file_name, c.page) not in sudah_ada
+        )
 
     def wrap(self, func: Callable[..., str], tool_name: str) -> Callable[..., str]:
         """Bungkus fungsi tool supaya argumen, hasil, dan latensinya tercatat.
@@ -98,6 +164,7 @@ class ToolCallRecorder:
     def reset(self) -> None:
         """Kosongkan jejak yang sudah terkumpul."""
         self.records.clear()
+        self.citations.clear()
 
 
 def build_tools(
@@ -139,6 +206,7 @@ def build_tools(
             Kutipan FAQ yang relevan beserta nama file dan halaman sumbernya.
         """
         nodes = faq_retriever.retrieve(query)
+        recorder.catat_sitasi(to_citations(nodes))
         return faq_retriever.format_for_llm(nodes)
 
     def search_products(

@@ -9,6 +9,8 @@ from app.api.chat.service import get_chat_service
 from app.api.main import create_app
 from app.models.chat import AgentReply, ToolCallRecord
 
+from tests.api.conftest import buka_sesi
+
 
 class StubChatbotService:
     """ChatbotService palsu yang mencatat pemanggilan dan mengembalikan jawaban tetap."""
@@ -18,10 +20,21 @@ class StubChatbotService:
         self.error = error
         self.received: list[dict[str, str]] = []
 
-    async def answer(self, session_id: str, message: str, channel: str = "web") -> AgentReply:
+    async def answer(
+        self,
+        session_id: str,
+        message: str,
+        channel: str = "web",
+        language: str = "id",
+    ) -> AgentReply:
         """Kembalikan jawaban tetap, atau lempar error yang sudah disiapkan."""
         self.received.append(
-            {"session_id": session_id, "message": message, "channel": channel}
+            {
+                "session_id": session_id,
+                "message": message,
+                "channel": channel,
+                "language": language,
+            }
         )
         if self.error is not None:
             raise self.error
@@ -55,10 +68,11 @@ def test_chat_returns_answer_and_tool_trace(client_factory) -> None:
         )
     )
     client = client_factory(service)
+    sesi = buka_sesi(client)
 
     response = client.post(
         "/api/v1/chat",
-        json={"session_id": "sesi-1", "message": "KAO-0001 size L ready?"},
+        json={"session_id": sesi, "message": "KAO-0001 size L ready?"},
     )
 
     assert response.status_code == 200
@@ -66,23 +80,25 @@ def test_chat_returns_answer_and_tool_trace(client_factory) -> None:
     assert payload["answer"] == "Size L masih ada 12 pcs kak."
     assert payload["tool_calls"][0]["tool_name"] == "check_stock"
     assert payload["tool_calls"][0]["latency_ms"] == 87
-    assert service.received[0]["session_id"] == "sesi-1"
+    assert service.received[0]["session_id"] == sesi
 
 
 def test_chat_rejects_empty_message(client_factory) -> None:
     client = client_factory(StubChatbotService())
+    sesi = buka_sesi(client)
 
-    response = client.post("/api/v1/chat", json={"session_id": "sesi-1", "message": ""})
+    response = client.post("/api/v1/chat", json={"session_id": sesi, "message": ""})
 
     assert response.status_code == 422
 
 
 def test_chat_rejects_unknown_channel(client_factory) -> None:
     client = client_factory(StubChatbotService())
+    sesi = buka_sesi(client)
 
     response = client.post(
         "/api/v1/chat",
-        json={"session_id": "sesi-1", "message": "halo", "channel": "telegram"},
+        json={"session_id": sesi, "message": "halo", "channel": "telegram"},
     )
 
     assert response.status_code == 422
@@ -91,9 +107,10 @@ def test_chat_rejects_unknown_channel(client_factory) -> None:
 def test_chat_reports_service_not_ready_as_503(client_factory) -> None:
     service = StubChatbotService(error=RuntimeError("Koleksi FAQ 'faq' kosong."))
     client = client_factory(service)
+    sesi = buka_sesi(client)
 
     response = client.post(
-        "/api/v1/chat", json={"session_id": "sesi-1", "message": "halo"}
+        "/api/v1/chat", json={"session_id": sesi, "message": "halo"}
     )
 
     assert response.status_code == 503

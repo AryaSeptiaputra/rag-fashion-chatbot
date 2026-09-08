@@ -15,6 +15,8 @@ from app.api.main import create_app
 from app.models.chat import AgentReply
 from app.repositories.base import RepositoryError
 
+from tests.api.conftest import buka_sesi
+
 
 def build_api_error(status_code: int, message: str) -> anthropic.APIStatusError:
     """Bangun APIStatusError seperti yang dilempar SDK anthropic."""
@@ -33,7 +35,13 @@ class FailingChatbotService:
     def __init__(self, error: Exception) -> None:
         self.error = error
 
-    async def answer(self, session_id: str, message: str, channel: str = "web") -> AgentReply:
+    async def answer(
+        self,
+        session_id: str,
+        message: str,
+        channel: str = "web",
+        language: str = "id",
+    ) -> AgentReply:
         """Selalu gagal dengan error yang sudah disiapkan."""
         raise self.error
 
@@ -46,9 +54,10 @@ def client_for(error: Exception) -> TestClient:
 
 
 def post_chat(client: TestClient) -> httpx.Response:
-    """Kirim satu permintaan chat yang valid."""
+    """Kirim satu permintaan chat yang valid, memakai sesi terbitan server."""
+    sesi = buka_sesi(client)
     return client.post(
-        "/api/v1/chat", json={"session_id": "sesi-1", "message": "halo"}
+        "/api/v1/chat", json={"session_id": sesi, "message": "halo"}
     )
 
 

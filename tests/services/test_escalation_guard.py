@@ -8,7 +8,7 @@ tanpa jejak dan pembeli menunggu balasan yang tidak akan pernah datang.
 import pytest
 
 from app.models.chat import ToolCallRecord
-from app.services.chatbot import _ESCALATION_CLAIM_PATTERN, ChatbotService
+from app.services.chatbot import _ESCALATION_CLAIM_PATTERNS, ChatbotService
 
 
 class SpyMemory:
@@ -55,14 +55,14 @@ NOT_CLAIMS = [
 
 @pytest.mark.parametrize("answer", CLAIMS)
 def test_pattern_detects_promise(answer: str) -> None:
-    assert _ESCALATION_CLAIM_PATTERN.search(answer)
+    assert _ESCALATION_CLAIM_PATTERNS["id"].search(answer)
 
 
 @pytest.mark.parametrize("answer", NOT_CLAIMS)
 def test_pattern_ignores_offers_and_unrelated_text(answer: str) -> None:
     # Menawarkan bukan menjanjikan; kalau ini ikut cocok, tabel escalations
     # akan penuh eskalasi palsu.
-    assert not _ESCALATION_CLAIM_PATTERN.search(answer)
+    assert not _ESCALATION_CLAIM_PATTERNS["id"].search(answer)
 
 
 def test_guard_records_escalation_when_model_only_promised() -> None:
@@ -127,3 +127,57 @@ def test_guard_does_not_hide_model_failure_from_eval() -> None:
 
     assert tool_calls == []
     assert len(memory.escalations) == 1
+
+
+# ---- Bahasa Inggris ----
+# Tanpa pola versi Inggris, menyalakan bahasa kedua sama dengan mematikan
+# guardrail ini: klaim "I've forwarded this to our admin" tidak akan cocok
+# dengan pola Indonesia, eskalasinya tidak tercatat, dan permintaan pembeli
+# hilang tanpa jejak.
+
+CLAIMS_EN = [
+    "I have forwarded this to our admin.",
+    "I've already passed your request to the admin team.",
+    "I will connect you with an admin right away.",
+    "I'm escalating this to an admin now.",
+]
+
+NOT_CLAIMS_EN = [
+    "Can I forward this to an admin for you?",
+    "Shall I connect you with an admin?",
+    "Would you like me to escalate this to an admin?",
+    "Size L still has 12 pieces in stock.",
+]
+
+
+@pytest.mark.parametrize("answer", CLAIMS_EN)
+def test_english_pattern_detects_promise(answer: str) -> None:
+    assert _ESCALATION_CLAIM_PATTERNS["en"].search(answer)
+
+
+@pytest.mark.parametrize("answer", NOT_CLAIMS_EN)
+def test_english_pattern_ignores_offers(answer: str) -> None:
+    assert not _ESCALATION_CLAIM_PATTERNS["en"].search(answer)
+
+
+def test_guard_records_english_promise() -> None:
+    memory = SpyMemory()
+    service = build_service(memory)
+
+    service._guard_unrecorded_escalation(
+        conversation_id="conv-1",
+        user_message="please connect me to an admin",
+        answer="I have forwarded this to our admin.",
+        tool_calls=[],
+        language="en",
+    )
+
+    assert len(memory.escalations) == 1
+    assert memory.escalations[0][1].startswith("[otomatis]")
+
+
+def test_indonesian_pattern_would_miss_english_promise() -> None:
+    """Merekam kenapa pola kedua harus ada, bukan sekadar boleh ada."""
+    assert not _ESCALATION_CLAIM_PATTERNS["id"].search(
+        "I have forwarded this to our admin."
+    )

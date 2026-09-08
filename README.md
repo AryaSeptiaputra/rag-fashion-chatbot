@@ -35,7 +35,7 @@ tidak tahu.
 | Vector DB | ChromaDB (persisten lokal) | Index FAQ dari PDF |
 | Embedding | `intfloat/multilingual-e5-base` (HuggingFace lokal) | Claude API tidak menyediakan embedding; model ini kuat di Bahasa Indonesia dan gratis |
 | API | FastAPI | `POST /api/v1/chat`, `GET /api/v1/health` |
-| Demo UI | Streamlit | Peragaan ke klien |
+| Demo UI | HTML/CSS/JS tanpa framework | Disajikan FastAPI, satu proses satu URL |
 
 ## Arsitektur
 
@@ -103,12 +103,15 @@ app/
 ├── tools/registry.py    # 8 FunctionTool + perekam audit
 ├── models/              # schema Pydantic
 ├── api/chat/            # routes.py · schemas.py · service.py
+├── api/demo/            # data acuan halaman panduan
+├── api/guards.py        # kuota pengunjung, kuota IP, plafon anggaran
+├── api/identity.py      # cookie pengunjung + kepemilikan sesi
 └── utils/               # logger, resolusi error pihak ketiga
 supabase/migrations/     # 001–008, skema 28 tabel + view + RPC + index + RLS
 scripts/                 # smoke_llm · ingest_faq · seed_database · run_eval
 evals/                   # dataset.jsonl (40 kasus) + panduan
 tests/                   # unit test repository & service, integration test route
-ui/streamlit_app.py      # demo UI
+web/                     # frontend: index.html + static/css + static/js
 ```
 
 ## Setup
@@ -205,9 +208,19 @@ bagian kebijakan retur.
 ### 5. Jalankan
 
 ```bash
-uvicorn app.api.main:app --reload
-streamlit run ui/streamlit_app.py     # terminal terpisah
+uvicorn app.api.main:app --reload --workers 1
 ```
+
+Buka `http://localhost:8000` — satu proses melayani API sekaligus halaman demo.
+
+Jalankan dengan **satu worker**. Kuota pengunjung, kuota IP, dan plafon anggaran
+semuanya disimpan di memori proses; beberapa worker berarti beberapa anggaran
+independen, yakni kelipatan dari plafon yang dimaksud.
+
+Untuk membangun atau memperagakan UI tanpa memakai saldo Claude, setel
+`DEMO_STUB_LLM=true` di `.env`. Endpoint chat akan melayani jawaban contoh dari
+fixture, lengkap dengan kutipan dan biaya taksiran, dan setiap balasan ditandai
+`stub: true` sehingga UI menampilkan pita "mode contoh".
 
 ```bash
 curl http://localhost:8000/api/v1/health

@@ -17,6 +17,7 @@ packages = [
     "app",
     "app.api",
     "app.api.chat",
+    "app.api.demo",
     "app.models",
     "app.prompts",
     "app.repositories",

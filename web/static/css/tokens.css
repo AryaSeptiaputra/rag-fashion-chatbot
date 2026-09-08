@@ -1,0 +1,52 @@
+/* Token desain GAYA.ID.
+ *
+ * Oranye punya dua nilai yang sengaja dipisah: --orange untuk isian, dan
+ * --orange-text untuk teks. Oranye terang di atas latar terang gagal uji
+ * kontras, dan itulah batas antara terbaca dan tidak.
+ */
+
+:root {
+  --ground: #f7f4ef;
+  --card: #ffffff;
+  --sunken: #f1ece4;
+
+  --ink: #22252e;
+  --ink-2: #5c6270;
+  --ink-3: #7c8394;
+  --ink-4: #9aa0b0;
+  --line: #ede7de;
+
+  --navy: #1e2f6b;
+  --navy-2: #33488c;
+  --navy-soft: #e9edf8;
+  --navy-ink: #29346b;
+
+  --orange: #e8712f;
+  --orange-text: #c1541b;
+  --orange-soft: #fbeadd;
+  --orange-ink: #8a4116;
+
+  --green: #2e7d5b;
+  --green-text: #226349;
+  --green-soft: #e4f1ea;
+  --green-ink: #1f5540;
+
+  --teal: #177c86;
+  --teal-text: #136069;
+  --teal-soft: #e1f0f2;
+
+  --red: #a83f39;
+  --red-soft: #fbe9e7;
+
+  --radius-card: 16px;
+  --radius-inner: 12px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgba(34, 37, 46, 0.04), 0 10px 24px rgba(34, 37, 46, 0.05);
+  --shadow-bubble: 0 1px 2px rgba(34, 37, 46, 0.04), 0 6px 16px rgba(34, 37, 46, 0.04);
+
+  --font-ui: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  --shell: 1180px;
+}

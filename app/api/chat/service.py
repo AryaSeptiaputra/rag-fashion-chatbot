@@ -9,6 +9,7 @@ from functools import lru_cache
 
 from fastapi import HTTPException
 
+from app.config import settings
 from app.dependencies import (
     get_chroma_client,
     get_embedding_model,
@@ -22,6 +23,7 @@ from app.repositories.sales import SalesRepository
 from app.repositories.sizing import SizingRepository
 from app.services.catalog import CatalogService
 from app.services.chatbot import ChatbotService
+from app.services.stub_chatbot import StubChatbotService
 from app.services.inventory import InventoryService
 from app.services.memory import ConversationMemory
 from app.services.order import OrderService
@@ -61,6 +63,17 @@ def build_chatbot_service() -> ChatbotService:
 
 
 @lru_cache(maxsize=1)
+def _cached_stub_service() -> StubChatbotService:
+    """Rakit layanan mode contoh sekali per proses.
+
+    Returns:
+        StubChatbotService yang di-cache.
+    """
+    logger.info("Mode contoh aktif: endpoint chat tidak akan memanggil Anthropic")
+    return StubChatbotService()
+
+
+@lru_cache(maxsize=1)
 def _cached_chatbot_service() -> ChatbotService:
     """Rakit ChatbotService sekali per proses.
 
@@ -72,7 +85,11 @@ def _cached_chatbot_service() -> ChatbotService:
 
 
 def get_chat_service() -> ChatbotService:
-    """Dependency FastAPI untuk ChatbotService.
+    """Dependency FastAPI untuk layanan chat.
+
+    Saat DEMO_STUB_LLM menyala, yang dikembalikan adalah StubChatbotService --
+    antarmukanya sama persis, tapi ia melayani jawaban contoh dan tidak pernah
+    menyentuh Anthropic. Percabangannya sengaja hanya di sini, satu tempat.
 
     Kegagalan perakitan diterjemahkan jadi HTTPException di sini, bukan di
     handler: dependency di-resolve sebelum badan handler dijalankan, jadi
@@ -86,6 +103,9 @@ def get_chat_service() -> ChatbotService:
     Raises:
         HTTPException: 503 kalau kredensial atau komponen belum siap.
     """
+    if settings.demo_stub_llm:
+        return _cached_stub_service()  # type: ignore[return-value]
+
     try:
         return _cached_chatbot_service()
     except (ValueError, RuntimeError) as exc:

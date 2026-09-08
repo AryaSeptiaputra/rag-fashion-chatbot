@@ -7,10 +7,100 @@ from llama_index.core.schema import NodeWithScore
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 from app.config import settings
+from app.models.chat import Citation
 from app.utils.errors import COLLECTION_MISSING_ERRORS
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+# Panjang cuplikan yang ditampilkan di panel kutipan UI. Cukup untuk mengenali
+# paragrafnya, tidak cukup untuk menggantikan jawaban.
+_PANJANG_CUPLIKAN = 180
+
+
+def to_citations(
+    nodes: list[NodeWithScore], max_citations: int = 4
+) -> list[Citation]:
+    """Ubah hasil retrieval jadi kutipan yang bisa ditampilkan ke pembeli.
+
+    Dipisah dari format_for_llm() karena keduanya melayani pembaca berbeda:
+    yang satu menyusun teks untuk model, yang ini menyusun metadata untuk
+    layar. Yang diterima model tidak berubah sama sekali.
+
+    Skor dari ChromaDB adalah exp(-jarak), jadi selalu berada di (0, 1] dan
+    aman dipersenkan apa adanya. Nilainya dilabeli "kemiripan", bukan
+    "akurasi": dengan embedding e5, kecocokan bagus jatuh di 55-82% dan yang
+    lemah di 20-37%.
+
+    Args:
+        nodes: Hasil dari FAQRetriever.retrieve().
+        max_citations: Jumlah kutipan terbanyak yang dikembalikan.
+
+    Returns:
+        Kutipan unik per (nama berkas, halaman), terurut dari paling mirip.
+    """
+    terbaik: dict[tuple[str, str | None], Citation] = {}
+
+    for node in nodes:
+        metadata = getattr(node, "metadata", None)
+        if not isinstance(metadata, dict):
+            # Node tanpa metadata bisa muncul kalau tipe node berubah antar
+            # versi LlamaIndex. Lewati, jangan gagalkan seluruh jawaban.
+            continue
+
+        file_name = str(metadata.get("file_name") or "Dokumen FAQ")
+        page = metadata.get("page_label")
+        page = str(page) if page is not None else None
+        score = getattr(node, "score", None)
+
+        kutipan = Citation(
+            file_name=file_name,
+            page=page,
+            score=score,
+            match_percent=_persen(score),
+            snippet=_cuplikan(node),
+        )
+
+        kunci = (file_name, page)
+        sebelumnya = terbaik.get(kunci)
+        if sebelumnya is None or (score or 0.0) > (sebelumnya.score or 0.0):
+            terbaik[kunci] = kutipan
+
+    terurut = sorted(terbaik.values(), key=lambda c: c.score or 0.0, reverse=True)
+    return terurut[:max_citations]
+
+
+def _persen(score: float | None) -> int | None:
+    """Ubah skor kemiripan jadi persentase bulat.
+
+    Args:
+        score: Skor dari vector store, atau None.
+
+    Returns:
+        Persentase 0-100, atau None kalau skor tidak tersedia.
+    """
+    if score is None:
+        return None
+    return round(min(max(score, 0.0), 1.0) * 100)
+
+
+def _cuplikan(node: NodeWithScore) -> str:
+    """Ambil awal isi chunk sebagai cuplikan satu baris.
+
+    Args:
+        node: Node hasil retrieval.
+
+    Returns:
+        Teks yang spasinya sudah dirapikan dan dipotong, atau string kosong.
+    """
+    ambil_isi = getattr(node, "get_content", None)
+    if not callable(ambil_isi):
+        return ""
+
+    isi = " ".join(str(ambil_isi()).split())
+    if len(isi) <= _PANJANG_CUPLIKAN:
+        return isi
+    return isi[:_PANJANG_CUPLIKAN].rstrip() + "..."
 
 
 class FAQRetriever:
