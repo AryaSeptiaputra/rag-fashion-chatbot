@@ -1,5 +1,9 @@
 # Environment
+# .env.* ikut diabaikan karena .env.claude-api memuat kunci Anthropic
+# dan service key Supabase; sebelumnya ia untracked tapi tidak terlindungi.
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 
@@ -28,7 +32,7 @@ models/**
 
 # Dokumen FAQ contoh ikut dikomit supaya repo bisa langsung dicoba orang lain;
 # dokumen FAQ klien yang asli tetap tertutup aturan data/** di atas.
-!data/raw/faq/faq-contoh.md
+!data/samples/faq-contoh.md
 
 # Artefak Supabase CLI. supabase/.temp/pooler-url memuat connection string
 # lengkap dengan password database, jadi seluruh direktori ini diabaikan.
