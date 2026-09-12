@@ -8,6 +8,8 @@
 export const KAMUS = {
   id: {
     tagline: "Tampil Percaya Diri Setiap Hari",
+    "notice.dummy":
+      "Seluruh data di demo ini fiktif — merek, katalog, stok, pesanan, sampai dokumen kebijakannya dibuat khusus untuk peragaan. Tidak ada toko sungguhan di baliknya.",
     "status.memanaskan": "menyiapkan Gaya…",
     "status.siap": "Gaya sudah siap menjawab",
     "status.gagal": "sebagian layanan belum siap",
@@ -105,6 +107,8 @@ export const KAMUS = {
 
   en: {
     tagline: "Confidence, Every Single Day",
+    "notice.dummy":
+      "Everything in this demo is fictional — the brand, catalogue, stock, orders, and policy documents were all made for the demonstration. There is no real store behind it.",
     "status.memanaskan": "warming Gaya up…",
     "status.siap": "Gaya is ready to answer",
     "status.gagal": "some services are not ready",

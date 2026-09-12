@@ -61,6 +61,44 @@ body[data-view="chat"] #view-chat {
 
 /* ---------- header ---------- */
 
+/* Navbar menempel di atas supaya identitas merek dan pemberitahuan data fiktif
+ * tidak ikut hilang saat halaman panduan digulir. Panduannya panjang, dan
+ * pemberitahuan yang cuma terlihat di awal sama saja dengan tidak ada. */
+.stickyhead {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px clamp(20px, 5vw, 80px);
+  background: var(--navy-soft);
+  color: var(--navy-ink);
+  border-bottom: 1px solid #dbe2f3;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.notice svg {
+  flex: none;
+}
+
+/* Di layar chat, pemberitahuan tidak lengket: kolom chat punya area gulirnya
+ * sendiri dan kepalanya memang sudah tetap di tempat. */
+.notice--chat {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 10px clamp(16px, 3vw, 34px);
+  /* Kolom chat adalah flex column; tanpa ini pemberitahuan ikut menyusut
+   * ketika transkripnya panjang. */
+  flex: none;
+}
+
 .topbar {
   display: flex;
   align-items: center;
